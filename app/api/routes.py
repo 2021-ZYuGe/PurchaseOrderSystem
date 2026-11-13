@@ -14,6 +14,7 @@ from app.infra.logging import log
 from app.services import archive as archive_service
 from app.services import contracts as contract_service
 from app.services import sync as sync_service
+from app.services import system as system_service
 
 # GET 也允许的只读接口（其余接口只接受 POST）
 GET_PATHS = (
@@ -21,6 +22,7 @@ GET_PATHS = (
     '/api/bootstrap',
     '/api/products',
     '/api/suppliers',
+    '/api/system/info',
     '/api/contract_status',
     '/api/sync_status',
     '/api/contract_expiry',
@@ -54,6 +56,9 @@ def dispatch(path, payload=None):
             return {'ok': True, 'data': {
                 'items': sqlite_store.search_suppliers(p.get('q') or ''),
             }}
+
+        if path == '/api/system/info':
+            return {'ok': True, 'data': system_service.info()}
 
         if path == '/api/archive':
             return {'ok': True, 'data': archive_service.load_archive()}

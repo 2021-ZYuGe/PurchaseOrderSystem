@@ -35,11 +35,19 @@ CONTRACT_DOC_PATH = APP_DIR / 'domain' / 'contract_doc.py'
 # 启动器用来判断"端口上的实例是不是这一份代码"
 STAMP_FILES = [
     'app/api/server.py',
+    'app/api/routes.py',
     'app/domain/contract_doc.py',
     'app/infra/store.py',
     'web/index.html',
-    'web/app.js',
+    'web/js/app-core.js',
+    'web/js/app-contract-status.js',
+    'web/js/app-expiry.js',
+    'web/js/app-order.js',
+    'web/js/app-docx.js',
+    'web/js/app-main.js',
+    'web/js/system-panel.js',
     'web/contract.html',
+    'web/js/contract-page.js',
 ]
 
 VERSION = '2026-11-13'

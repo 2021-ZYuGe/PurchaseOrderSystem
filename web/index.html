@@ -9,9 +9,15 @@
 <style>
 * { margin:0; padding:0; box-sizing:border-box; }
 body { font-family:"Microsoft YaHei",sans-serif; background:#f0f2f5; color:#1f2329; font-size:14px; }
-.header { background:#1a5fb4; color:#fff; padding:14px 28px; display:flex; justify-content:space-between; align-items:center; }
+.header { background:#1a5fb4; color:#fff; padding:14px 28px; display:flex; justify-content:space-between;
+  align-items:center; flex-wrap:wrap; gap:10px 18px; }
 .header h1 { font-size:18px; font-weight:600; }
 .header .sub { font-size:12px; opacity:.8; margin-top:2px; }
+.header .head-left { flex:1 1 320px; min-width:0; }
+.header .head-right { display:flex; align-items:center; gap:12px; flex-wrap:wrap; justify-content:flex-end; }
+.header .head-right .stat { white-space:nowrap; }
+.header .head-btn { white-space:nowrap; }
+#instBadge { max-width:220px; overflow:hidden; text-overflow:ellipsis; }
 .wrap { max-width:1280px; margin:20px auto; padding:0 20px; }
 .card { background:#fff; border-radius:10px; padding:20px 24px; margin-bottom:16px; box-shadow:0 1px 3px rgba(0,0,0,.06); }
 .card h2 { font-size:15px; font-weight:600; margin-bottom:14px; color:#1a5fb4; display:flex; align-items:center; gap:8px; }
@@ -159,17 +165,33 @@ mark { background:#fff3bf; color:#8a5a00; padding:0 1px; border-radius:2px; }
 .img-switch { position:absolute; right:2px; bottom:2px; width:20px; height:20px; border-radius:50%; background:rgba(26,95,180,.88); color:#fff;
   font-size:12px; line-height:20px; text-align:center; cursor:pointer; user-select:none; }
 .img-switch:hover { background:#1a5fb4; }
+/* 系统状态面板（Vue 组件） */
+[v-cloak] { display:none; }
+.sys-panel { width:min(560px,94vw); }
+.sys-body { padding:14px 22px; overflow:auto; }
+.sys-row { display:flex; gap:16px; padding:9px 0; border-bottom:1px solid #f0f2f5; font-size:13px; align-items:flex-start; }
+.sys-row:last-child { border-bottom:none; }
+.sys-k { color:#5f6b7a; width:94px; flex:none; }
+.sys-v { color:#1f2329; font-weight:500; text-align:right; flex:1; }
+.sys-v.sys-wide { text-align:left; word-break:break-all; font-weight:400; color:#3c4656; }
+.sys-empty { padding:26px 0; text-align:center; color:#8a94a3; font-size:13px; }
+.sys-error { color:#c62828; }
+.sys-foot { padding:12px 22px 18px; display:flex; justify-content:flex-end; gap:10px; border-top:1px solid #eef1f5; }
+.sys-btn { padding:8px 16px; border-radius:7px; border:1px solid #d5dbe3; background:#fff; cursor:pointer; font-size:13px; font-family:inherit; }
+.sys-btn.primary { background:#1a5fb4; border-color:#1a5fb4; color:#fff; }
+.sys-btn:disabled { opacity:.6; cursor:default; }
 </style>
 </head>
 <body>
 <div class="header">
-  <div><h1>采购下单系统</h1><div class="sub">选供应商 → 选产品 → 填单价数量 → 自动算总价 → 导出合同</div></div>
-  <div style="display:flex;align-items:center;gap:16px">
+  <div class="head-left"><h1>采购下单系统</h1><div class="sub">选供应商 → 选产品 → 填单价数量 → 自动算总价 → 导出合同</div></div>
+  <div class="head-right">
     <div class="stat" id="instBadge" style="color:#dcebff;font-size:12px;white-space:nowrap;opacity:.85"></div>
-    <a class="stat" href="/contract.html" style="text-decoration:none;background:rgba(255,255,255,.16);
+    <a class="stat head-btn" href="/contract.html" style="text-decoration:none;background:rgba(255,255,255,.16);
        border:1px solid rgba(255,255,255,.45);color:#fff;padding:6px 14px;border-radius:6px;font-size:13px"
        onmouseover="this.style.background='rgba(255,255,255,.3)'" onmouseout="this.style.background='rgba(255,255,255,.16)'"
-       >＋ 主合同（新签 / 续签）</a>
+       >＋ 主合同</a>
+    <div id="systemPanel" v-cloak></div>
     <a class="btn-expiry" href="javascript:;" onclick="openExpiry()">合同到期
       <span class="badge" id="expiryBadge" style="display:none">0</span></a>
     <div class="stat" id="statInfo"></div>
@@ -303,11 +325,15 @@ mark { background:#fff3bf; color:#8a5a00; padding:0 1px; border-radius:2px; }
   </div>
 </div>
 
-<script>
-// 数据不再打包成 data.js：页面启动后由 app.js 调 /api/bootstrap 拉取
-window.SUPPLIERS = window.SUPPLIERS || [];
-document.write('<scr' + 'ipt src="app.js?t=' + Date.now() + '"></scr' + 'ipt>');
-</script>
+<!-- 页面脚本按职责拆分；必须保持顺序（经典脚本，顶层函数要挂到 window 供内联事件调用） -->
+<script src="vendor/vue.global.prod.js"></script>
+<script src="js/app-core.js"></script>
+<script src="js/app-contract-status.js"></script>
+<script src="js/app-expiry.js"></script>
+<script src="js/app-order.js"></script>
+<script src="js/app-docx.js"></script>
+<script src="js/system-panel.js"></script>
+<script src="js/app-main.js"></script>
 <script>
 // 数据为空或加载失败时的顶部提示条（由 app.js 调用）
 function __showGuide(html) {

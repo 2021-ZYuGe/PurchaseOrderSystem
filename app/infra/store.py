@@ -216,6 +216,8 @@ def connect(path=None):
     conn.execute("PRAGMA busy_timeout = 5000")
     # journal_mode 只在初始化时设置；每个并发连接重复切换 WAL 会在 Windows 上争抢锁。
     conn.execute("PRAGMA synchronous = NORMAL")
+    # 搜索用：把 Python 的归一化逻辑暴露给 SQL，保证"空格/大小写"处理与前端完全一致
+    conn.create_function("norm_text", 1, _norm_text, deterministic=True)
     return conn
 
 
@@ -569,11 +571,58 @@ def replace_catalog(products, suppliers, backup=True, imported_index=None,
     clear_pending_cache()
 
 
-def _grouped_rows(conn, sql, key_name):
+def _grouped_rows(conn, sql, key_name, params=()):
     result = {}
-    for row in conn.execute(sql):
+    for row in conn.execute(sql, params):
         result.setdefault(row[key_name], []).append(row)
     return result
+
+
+def _placeholders(count):
+    return ",".join("?" * count)
+
+
+def _hydrate_products(conn, product_rows):
+    """把 products 行补全成接口用的字典（价格/别名/分类/备选图/供应商名）。
+
+    传入多少行就只补多少行：搜索时不必把整个产品库都装进内存。
+    """
+    if not product_rows:
+        return []
+    ids = [row["id"] for row in product_rows]
+    marks = _placeholders(len(ids))
+    prices = _grouped_rows(
+        conn, "SELECT * FROM product_prices WHERE product_id IN (%s) "
+              "ORDER BY product_id, position" % marks, "product_id", ids)
+    aliases = _grouped_rows(
+        conn, "SELECT * FROM product_aliases WHERE product_id IN (%s) "
+              "ORDER BY product_id, position" % marks, "product_id", ids)
+    categories = _grouped_rows(
+        conn, "SELECT * FROM product_categories WHERE product_id IN (%s) "
+              "ORDER BY product_id, position" % marks, "product_id", ids)
+    images = _grouped_rows(
+        conn, "SELECT * FROM product_alternative_images WHERE product_id IN (%s) "
+              "ORDER BY product_id, position" % marks, "product_id", ids)
+    sup_names = _grouped_rows(
+        conn, "SELECT * FROM product_supplier_names WHERE product_id IN (%s) "
+              "ORDER BY product_id, position" % marks, "product_id", ids)
+
+    products = []
+    for row in product_rows:
+        pid = row["id"]
+        products.append({
+            "id": row["code"],
+            "产品名称": row["name"],
+            "规格": row["spec"],
+            "图片": row["image"],
+            "供应商": [x["supplier_name"] for x in sup_names.get(pid, [])],
+            "历史单价": [x["price"] for x in prices.get(pid, [])],
+            "分类": [x["category"] for x in categories.get(pid, [])],
+            "下单次数": row["order_count"],
+            "别名": [x["alias"] for x in aliases.get(pid, [])],
+            "备选图片": [x["filename"] for x in images.get(pid, [])],
+        })
+    return products
 
 
 def get_catalog():
@@ -583,14 +632,10 @@ def get_catalog():
         product_rows = conn.execute(
             "SELECT * FROM products ORDER BY CAST(SUBSTR(code, 2) AS INTEGER), code"
         ).fetchall()
+        products = _hydrate_products(conn, product_rows)
         supplier_rows = conn.execute(
             "SELECT * FROM suppliers ORDER BY CAST(SUBSTR(code, 2) AS INTEGER), code"
         ).fetchall()
-        prices = _grouped_rows(conn, "SELECT * FROM product_prices ORDER BY product_id, position", "product_id")
-        aliases = _grouped_rows(conn, "SELECT * FROM product_aliases ORDER BY product_id, position", "product_id")
-        categories = _grouped_rows(conn, "SELECT * FROM product_categories ORDER BY product_id, position", "product_id")
-        images = _grouped_rows(conn, "SELECT * FROM product_alternative_images ORDER BY product_id, position", "product_id")
-        sup_names = _grouped_rows(conn, "SELECT * FROM product_supplier_names ORDER BY product_id, position", "product_id")
         relation_rows = conn.execute(
             "SELECT sp.supplier_id, p.code FROM supplier_products sp "
             "JOIN products p ON p.id=sp.product_id ORDER BY p.code"
@@ -598,22 +643,6 @@ def get_catalog():
         relations = {}
         for row in relation_rows:
             relations.setdefault(row["supplier_id"], []).append(row["code"])
-
-        products = []
-        for row in product_rows:
-            pid = row["id"]
-            products.append({
-                "id": row["code"],
-                "产品名称": row["name"],
-                "规格": row["spec"],
-                "图片": row["image"],
-                "供应商": [x["supplier_name"] for x in sup_names.get(pid, [])],
-                "历史单价": [x["price"] for x in prices.get(pid, [])],
-                "分类": [x["category"] for x in categories.get(pid, [])],
-                "下单次数": row["order_count"],
-                "别名": [x["alias"] for x in aliases.get(pid, [])],
-                "备选图片": [x["filename"] for x in images.get(pid, [])],
-            })
         suppliers = []
         stats = supplier_contract_stats()
         for row in supplier_rows:
@@ -1592,18 +1621,33 @@ def list_suppliers_light():
     return result
 
 
+def _like_escape(value):
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 def search_products(query, supplier_code=None, limit=20):
-    """产品搜索：命中规则与排序跟原来的前端本地搜索保持一致"""
+    """产品搜索：过滤下推到 SQLite，只回填命中的行。
+
+    命中规则与前端原来的本地搜索一致：名称 / 别名 / 2 字以上规格；
+    排序：该供应商的产品 → 有图 → 下单次数。
+    """
     raw = str(query or "").strip()
     q = _norm_text(raw)
     if not q:
         return []
-    products, _ = get_catalog()
-    hits = [p for p in products if _product_hit(p, q, len(raw))]
-
+    like = "%" + _like_escape(q) + "%"
+    sql = (
+        "SELECT p.* FROM products p WHERE "
+        "norm_text(p.name) LIKE ? ESCAPE '\\' "
+        "OR EXISTS (SELECT 1 FROM product_aliases a "
+        "           WHERE a.product_id = p.id AND norm_text(a.alias) LIKE ? ESCAPE '\\') "
+        "OR (? >= 2 AND norm_text(p.spec) LIKE ? ESCAPE '\\') "
+        "ORDER BY CAST(SUBSTR(p.code, 2) AS INTEGER), p.code"
+    )
+    limit = max(1, int(limit or 20))
     sup_keys = set()
-    if supplier_code:
-        with session() as conn:
+    with session() as conn:
+        if supplier_code:
             row = conn.execute(
                 "SELECT id FROM suppliers WHERE code = ?", (supplier_code,)).fetchone()
             if row:
@@ -1611,13 +1655,13 @@ def search_products(query, supplier_code=None, limit=20):
                     "SELECT p.code FROM supplier_products sp "
                     "JOIN products p ON p.id = sp.product_id WHERE sp.supplier_id = ?",
                     (row["id"],))}
-    # 该供应商的产品优先 → 有图的优先 → 下单次数多的优先
-    hits.sort(key=lambda p: (
-        0 if p["id"] in sup_keys else 1,
-        0 if p.get("图片") else 1,
-        -int(p.get("下单次数") or 0),
-    ))
-    return hits[:max(1, int(limit or 20))]
+        rows = conn.execute(sql, (like, like, len(raw), like)).fetchall()
+        rows.sort(key=lambda r: (
+            0 if r["code"] in sup_keys else 1,
+            0 if r["image"] else 1,
+            -int(r["order_count"] or 0),
+        ))
+        return _hydrate_products(conn, rows[:limit])
 
 
 def search_suppliers(query):
@@ -1627,3 +1671,11 @@ def search_suppliers(query):
     if not q:
         return items
     return [s for s in items if q in _norm_text(s["供应商名称"])]
+
+
+def schema_info():
+    """当前程序要求的结构版本 + 已应用的迁移版本"""
+    with session() as conn:
+        applied = [r[0] for r in conn.execute(
+            "SELECT version FROM schema_migrations ORDER BY version")]
+    return {"current": SCHEMA_VERSION, "applied": applied}
