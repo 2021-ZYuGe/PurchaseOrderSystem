@@ -8,10 +8,12 @@ import ctypes
 import os
 import re
 import sqlite3
+import shutil
 import subprocess
 import sys
 import tempfile
 import threading
+import zipfile
 import time
 from ctypes import wintypes
 from pathlib import Path
@@ -21,6 +23,7 @@ from app.infra import media, store
 from app.infra.logging import log
 
 MAX_RESTORE_BYTES = 60 * 1024 * 1024
+MAX_PACKAGE_BYTES = 200 * 1024 * 1024
 
 _LOCK = threading.Lock()
 _STATE = {
@@ -170,47 +173,58 @@ def pick_folder():
         return ''
 
 
+def _check_db_file(path):
+    """校验 sqlite 文件；返回错误字符串，没问题返回空串"""
+    try:
+        conn = sqlite3.connect(str(path))
+        try:
+            integrity = conn.execute('PRAGMA integrity_check').fetchone()[0]
+            tables = {r[0] for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'")}
+            row = conn.execute(
+                "SELECT value FROM schema_meta WHERE key='schema_version'").fetchone() \
+                if 'schema_meta' in tables else None
+        finally:
+            conn.close()
+    except sqlite3.DatabaseError:
+        return '这不是有效的数据库文件'
+    if integrity != 'ok':
+        return '数据库校验失败：%s' % integrity
+    if not {'products', 'suppliers'}.issubset(tables):
+        return '这个文件不是本系统的数据库'
+    version = int(row[0]) if row else 0
+    if version > int(store.SCHEMA_VERSION):
+        return '备份来自更新版本（数据 v%d），请升级程序后再恢复' % version
+    return ''
+
+
+def _apply_db_file(path):
+    """覆盖当前库（先自动备份），并完成迁移与缓存清理"""
+    if Path(store.DB_PATH).exists():
+        store.backup_database('before_restore')
+    store.restore_database(str(path))
+    store.ensure_database()
+    store.clear_pending_cache()
+
+
 def restore_database(raw_bytes):
-    """用上传的 .db 覆盖当前库；覆盖前自动备份当前库。"""
+    """从单个 .db 字节恢复"""
     if not raw_bytes:
         return {'ok': False, 'error': '没有收到文件'}
     if len(raw_bytes) > MAX_RESTORE_BYTES:
-        return {'ok': False, 'error': '数据库文件太大（超过 60MB）'}
+        return {'ok': False, 'error': '文件太大（超过 %dMB）' % (MAX_RESTORE_BYTES // 1024 // 1024)}
 
     tmp_dir = Path(tempfile.mkdtemp(prefix='restore_'))
     tmp = tmp_dir / 'restore.db'
     try:
         tmp.write_bytes(raw_bytes)
-        try:
-            conn = sqlite3.connect(str(tmp))
-            try:
-                integrity = conn.execute('PRAGMA integrity_check').fetchone()[0]
-                tables = {r[0] for r in conn.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table'")}
-                row = conn.execute(
-                    "SELECT value FROM schema_meta WHERE key='schema_version'").fetchone() \
-                    if 'schema_meta' in tables else None
-            finally:
-                conn.close()
-        except sqlite3.DatabaseError:
-            return {'ok': False, 'error': '这不是有效的数据库文件'}
-
-        if integrity != 'ok':
-            return {'ok': False, 'error': '数据库校验失败：%s' % integrity}
-        if not {'products', 'suppliers'}.issubset(tables):
-            return {'ok': False, 'error': '这个文件不是本系统的数据库'}
-        version = int(row[0]) if row else 0
-        if version > int(store.SCHEMA_VERSION):
-            return {'ok': False, 'error': '备份来自更新版本（数据 v%d），请升级程序后再恢复' % version}
-
-        if Path(store.DB_PATH).exists():
-            store.backup_database('before_restore')
-        store.restore_database(str(tmp))
-        store.ensure_database()
-        store.clear_pending_cache()
+        error = _check_db_file(tmp)
+        if error:
+            return {'ok': False, 'error': error}
+        _apply_db_file(tmp)
         media.ensure_migrated()
         log('已从上传的数据库恢复：产品 %d 个' % store.product_count())
-        return {'ok': True, 'products': store.product_count()}
+        return {'ok': True, 'products': store.product_count(), 'media': 0}
     finally:
         try:
             tmp.unlink()
@@ -220,3 +234,61 @@ def restore_database(raw_bytes):
             tmp_dir.rmdir()
         except OSError:
             pass
+
+
+def restore_package(raw_bytes):
+    """从数据包（zip：purchase.db + media/）恢复"""
+    if len(raw_bytes) > MAX_PACKAGE_BYTES:
+        return {'ok': False, 'error': '数据包太大（超过 %dMB）'
+                % (MAX_PACKAGE_BYTES // 1024 // 1024)}
+    tmp_dir = Path(tempfile.mkdtemp(prefix='restore_pkg_'))
+    tmp_zip = tmp_dir / 'package.zip'
+    try:
+        tmp_zip.write_bytes(raw_bytes)
+        try:
+            zf = zipfile.ZipFile(tmp_zip)
+        except zipfile.BadZipFile:
+            return {'ok': False, 'error': '这不是有效的数据包（zip）'}
+
+        with zf:
+            names = zf.namelist()
+            db_member = next((n for n in names
+                              if n == 'purchase.db' or n.endswith('/purchase.db')), None)
+            if not db_member:
+                return {'ok': False, 'error': '数据包里没有 purchase.db'}
+            db_file = tmp_dir / 'purchase.db'
+            with zf.open(db_member) as src, open(db_file, 'wb') as dst:
+                shutil.copyfileobj(src, dst)
+            error = _check_db_file(db_file)
+            if error:
+                return {'ok': False, 'error': error}
+
+            _apply_db_file(db_file)
+
+            media_dir = Path(store.DATA_DIR) / 'media'
+            media_dir.mkdir(parents=True, exist_ok=True)
+            copied = 0
+            for name in names:
+                if not name.startswith('media/') or name.endswith('/'):
+                    continue
+                filename = Path(name).name
+                if not filename:
+                    continue
+                target = media_dir / filename
+                try:
+                    with zf.open(name) as src, open(target, 'wb') as dst:
+                        shutil.copyfileobj(src, dst)
+                    copied += 1
+                except OSError:
+                    continue
+        log('已从数据包恢复：产品 %d 个，图片 %d 张' % (store.product_count(), copied))
+        return {'ok': True, 'products': store.product_count(), 'media': copied}
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def restore_any(raw_bytes):
+    """按文件头判断是数据库还是数据包"""
+    if raw_bytes[:4] == b'PK\x03\x04':
+        return restore_package(raw_bytes)
+    return restore_database(raw_bytes)

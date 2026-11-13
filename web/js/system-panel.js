@@ -61,6 +61,10 @@
         location.href = '/api/backup/download';
       }
 
+      function downloadPackage() {
+        location.href = '/api/data/export';
+      }
+
       const rows = computed(() => {
         const d = info.value;
         if (!d) return [];
@@ -75,7 +79,7 @@
       });
 
       return { open, loading, error, info, rows, note, show, close, load,
-               backupNow, downloadDb };
+               backupNow, downloadDb, downloadPackage };
     },
     template: `
       <a class="btn-expiry" href="javascript:;" @click="show">系统状态</a>
@@ -102,6 +106,7 @@
           <div class="sys-foot">
             <button type="button" class="sys-btn" @click="backupNow">立即备份</button>
             <button type="button" class="sys-btn" @click="downloadDb">下载数据库</button>
+            <button type="button" class="sys-btn" @click="downloadPackage">导出数据包</button>
             <span class="sys-spacer"></span>
             <button type="button" class="sys-btn" @click="load" :disabled="loading">
               {{ loading ? '读取中…' : '刷新' }}

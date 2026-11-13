@@ -341,7 +341,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             elif n > setup_service.MAX_RESTORE_BYTES:
                 result = {'ok': False, 'error': '数据库文件太大（超过 60MB）'}
             else:
-                result = setup_service.restore_database(self.rfile.read(n))
+                result = setup_service.restore_any(self.rfile.read(n))
             body = json.dumps(result, ensure_ascii=False).encode('utf-8')
             self.send_response(200)
             self.send_header('Content-Type', 'application/json; charset=utf-8')
@@ -375,6 +375,33 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
         global _alive_armed, _alive_empty_at
         head = self.path.split('?')[0]
+        if head == '/api/data/export':
+            try:
+                path = backup_service.export_package()
+            except Exception as e:
+                log('导出数据包失败：%r' % (e,))
+                self.send_error(500)
+                return
+            try:
+                size = path.stat().st_size
+                filename = path.name
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/zip')
+                self.send_header('Content-Disposition',
+                                 "attachment; filename*=UTF-8''%s" % urllib.parse.quote(filename))
+                self.send_header('Content-Length', str(size))
+                self.end_headers()
+                with open(path, 'rb') as f:
+                    while True:
+                        chunk = f.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        self.wfile.write(chunk)
+                log('已导出数据包：%s（%.1f MB）' % (filename, size / 1024 / 1024))
+            finally:
+                import shutil
+                shutil.rmtree(path.parent, ignore_errors=True)
+            return
         if head == '/api/backup/download':
             data = backup_service.snapshot_bytes()
             if not data:

@@ -97,3 +97,35 @@ def snapshot_bytes():
         return target.read_bytes()
     finally:
         shutil.rmtree(folder, ignore_errors=True)
+
+
+def export_package():
+    """导出「数据包」：purchase.db + media 图片，打包成 zip。
+
+    返回 zip 路径；调用方负责删除它的父目录。
+    """
+    import shutil
+    import sqlite3
+    import tempfile
+    import zipfile
+
+    folder = Path(tempfile.mkdtemp(prefix='package_'))
+    db_file = folder / 'purchase.db'
+    with sqlite3.connect(str(store.DB_PATH)) as source, \
+            sqlite3.connect(str(db_file)) as dest:
+        source.backup(dest)
+
+    zip_path = folder / ('采购下单系统_数据包_%s.zip' % time.strftime('%Y%m%d_%H%M'))
+    media_dir = Path(store.DATA_DIR) / 'media'
+    try:
+        with zipfile.ZipFile(zip_path, 'w') as zf:
+            zf.write(db_file, 'purchase.db', compress_type=zipfile.ZIP_DEFLATED)
+            if media_dir.is_dir():
+                for item in media_dir.iterdir():
+                    if item.is_file():
+                        zf.write(item, 'media/' + item.name,
+                                 compress_type=zipfile.ZIP_STORED)
+        return zip_path
+    except Exception:
+        shutil.rmtree(folder, ignore_errors=True)
+        raise
