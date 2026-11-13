@@ -8,7 +8,10 @@
 运行：
     python -m unittest discover -s tests -v
 """
+import shutil
+import sqlite3
 import sys
+import tempfile
 import unittest
 from datetime import datetime
 from pathlib import Path
@@ -139,6 +142,33 @@ class StorePureTests(unittest.TestCase):
         got = self.store.normalize_path('data/../data/purchase.db')
         self.assertTrue(got.endswith('data' + __import__('os').sep + 'purchase.db'))
         self.assertEqual(got, self.store.normalize_path(got))
+
+
+class SchemaGuardTests(unittest.TestCase):
+    """旧程序打开新版数据时必须拒绝启动，不能静默降级写坏结构"""
+
+    def setUp(self):
+        self.store = _loader.store()
+        self.tmp = Path(tempfile.mkdtemp(prefix='schema_'))
+        self.saved = (self.store.DB_PATH, self.store.DATA_DIR, self.store.BACKUP_DIR)
+        db = self.tmp / 'purchase.db'
+        conn = sqlite3.connect(str(db))
+        conn.execute('CREATE TABLE schema_meta(key TEXT PRIMARY KEY, value TEXT NOT NULL)')
+        conn.execute("INSERT INTO schema_meta VALUES('schema_version', '99')")
+        conn.commit()
+        conn.close()
+        self.store.DB_PATH = db
+        self.store.DATA_DIR = self.tmp
+        self.store.BACKUP_DIR = self.tmp / 'backups'
+
+    def tearDown(self):
+        self.store.DB_PATH, self.store.DATA_DIR, self.store.BACKUP_DIR = self.saved
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_rejects_newer_schema(self):
+        with self.assertRaises(RuntimeError) as ctx:
+            self.store.ensure_database()
+        self.assertIn('更新版本', str(ctx.exception))
 
 
 if __name__ == '__main__':

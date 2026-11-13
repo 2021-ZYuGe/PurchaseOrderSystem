@@ -18,6 +18,7 @@ projects/
 !tests/golden/**/*.docx
 
 # 运行时产物
+dist/
 __pycache__/
 *.py[cod]
 _增量批次_*/

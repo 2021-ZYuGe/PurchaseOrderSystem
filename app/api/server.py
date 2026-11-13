@@ -27,6 +27,8 @@ from app.api import routes
 from app.infra import media, store as sqlite_store
 from app.infra.logging import log
 from app.services import archive as archive_service
+from app.services import backup as backup_service
+from app.services import setup as setup_service
 
 HERE = os.path.dirname(os.path.abspath(__file__))      # app/api
 ROOT = config.ROOT                                      # 项目根目录
@@ -46,9 +48,8 @@ OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 APP_VER = config.VERSION      # 版本日期：页面右上角会显示，用来一眼区分新旧系统
 CREATE_NO_WINDOW = 0x08000000
 # 想故意同时开两份（调试用）时，设环境变量 CAIGOU_ALLOW_MULTI=1
-# 【重构副本专用】这里固定为 True：允许和桌面「Purchase Order System」同时运行，
-# 不再抢占 8899、也不会停掉旧系统的实例。P4 分发改造时改回读环境变量。
-ALLOW_MULTI = True
+# 正式分发默认单实例：后双击的那份会接管端口，避免旧文件夹的实例继续被打开。
+ALLOW_MULTI = os.environ.get('CAIGOU_ALLOW_MULTI') == '1'
 
 STAMP_FILES = config.STAMP_FILES
 
@@ -232,12 +233,13 @@ def find_port():
     return None
 
 
-def open_in_browser(port):
+def open_in_browser(port, path=None):
     """关键：URL 带时间戳，避免浏览器复用同网址的旧标签页（不刷新）"""
     if NO_BROWSER:
         log('本次设定：不自动打开浏览器')
         return ''
-    url = 'http://127.0.0.1:%d%s?t=%d' % (port, OPEN_PATH, int(time.time() * 1000))
+    target = path or OPEN_PATH
+    url = 'http://127.0.0.1:%d%s?t=%d' % (port, target, int(time.time() * 1000))
     try:
         webbrowser.open(url)
     except Exception as e:
@@ -331,6 +333,22 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 pass
             self._client_bye(self._query())
             return
+        if path == '/api/setup/restore':
+            # 原始二进制上传（浏览器直接 POST 文件内容），不走 JSON
+            n = int(self.headers.get('Content-Length') or 0)
+            if n <= 0:
+                result = {'ok': False, 'error': '没有收到文件'}
+            elif n > setup_service.MAX_RESTORE_BYTES:
+                result = {'ok': False, 'error': '数据库文件太大（超过 60MB）'}
+            else:
+                result = setup_service.restore_database(self.rfile.read(n))
+            body = json.dumps(result, ensure_ascii=False).encode('utf-8')
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json; charset=utf-8')
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if not path.startswith('/api/'):
             self.send_error(404)
             return
@@ -357,6 +375,20 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
         global _alive_armed, _alive_empty_at
         head = self.path.split('?')[0]
+        if head == '/api/backup/download':
+            data = backup_service.snapshot_bytes()
+            if not data:
+                self.send_error(404)
+                return
+            filename = '采购下单系统_备份_%s.db' % time.strftime('%Y%m%d_%H%M')
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/octet-stream')
+            self.send_header('Content-Disposition',
+                             "attachment; filename*=UTF-8''%s" % urllib.parse.quote(filename))
+            self.send_header('Content-Length', str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
         if head.startswith('/media/') or head.startswith('/图片/'):
             self._serve_media(head)
             return
@@ -508,33 +540,26 @@ def main():
     except Exception as e:
         log('图片迁移失败（不影响使用）: %r' % (e,))
 
+    try:
+        backup_service.daily_if_needed()
+    except Exception as e:
+        log('每日备份失败（不影响使用）: %r' % (e,))
+
     if not os.path.exists(os.path.join(WEB, 'index.html')):
         _msgbox('找不到网页文件 web\\index.html，文件夹不完整，请重新解压。')
         return
 
-    # 第一次使用：SQLite 中还没有产品，直接引导导入。
-    if sqlite_store.product_count() == 0:
-        log('SQLite 中还没有产品，引导数据导入')
-        _msgbox('第一次使用，还没有你的合同数据。\n\n'
-                '点「确定」后会弹出数据导入窗口（黑色窗口）：\n'
-                '把你自己导出的合同文件夹路径粘贴进去，回车即可。\n\n'
-                '导入完成后，再双击一次「工具\\打开系统.py」就能用了。',
-                icon=0x40)
-        try:
-            import subprocess
-            subprocess.Popen([os.path.join(ROOT, '运行环境', 'python.exe'),
-                              str(config.TOOLS_DIR / '更新数据源.py')], cwd=ROOT)
-        except Exception as e:
-            log('拉起数据导入失败: %r' % (e,))
-            _msgbox('没能自动打开数据导入窗口，请手动双击「工具\\更新数据源.py」。')
-        return
+    # 第一次使用：没有产品时打开向导页，由页面完成导入/恢复
+    first_run = sqlite_store.product_count() == 0
+    if first_run:
+        log('数据库中还没有产品，打开首启向导')
 
     running = already_running()
     if running:
         log('已有实例在 %d，直接打开浏览器' % running)
         if not NO_BROWSER:
             _arm_auto_stop(running)
-        open_in_browser(running)
+        open_in_browser(running, '/welcome.html' if first_run else None)
         return
 
     # 本目录没有实例：先把别的目录（旧系统）的实例停掉，独占 8899
@@ -552,9 +577,10 @@ def main():
         ('127.0.0.1', port), functools.partial(Handler))
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
 
-    log('服务已启动: http://127.0.0.1:%d/index.html' % port)
+    landing = '/welcome.html' if first_run else OPEN_PATH
+    log('服务已启动: http://127.0.0.1:%d%s' % (port, landing))
     threading.Thread(target=_watch_pages, args=(httpd,), daemon=True).start()
-    open_in_browser(port)
+    open_in_browser(port, landing)
 
     while not STOP.is_set():
         time.sleep(0.5)

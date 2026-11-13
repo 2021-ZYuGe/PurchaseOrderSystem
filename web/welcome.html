@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>欢迎使用 - 采购下单系统</title>
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:"Microsoft YaHei",sans-serif; background:#f0f2f5; color:#1f2329; font-size:14px; }
+[v-cloak] { display:none; }
+.header { background:#1a5fb4; color:#fff; padding:18px 28px; }
+.header h1 { font-size:20px; font-weight:600; }
+.header .sub { font-size:12px; opacity:.82; margin-top:4px; }
+.wrap { max-width:820px; margin:24px auto; padding:0 20px; }
+.card { background:#fff; border-radius:12px; padding:22px 24px; margin-bottom:16px; box-shadow:0 1px 3px rgba(0,0,0,.06); }
+.card h2 { font-size:16px; font-weight:600; color:#1a5fb4; margin-bottom:6px; }
+.card .desc { font-size:13px; color:#5f6b7a; line-height:1.8; margin-bottom:14px; }
+.row { display:flex; gap:10px; flex-wrap:wrap; }
+input[type=text] { flex:1; min-width:260px; padding:10px 12px; border:1px solid #d5dbe3; border-radius:8px; font-size:14px; font-family:inherit; }
+input[type=text]:focus { outline:none; border-color:#1a5fb4; box-shadow:0 0 0 2px rgba(26,95,180,.12); }
+button { padding:10px 18px; border-radius:8px; border:1px solid #d5dbe3; background:#fff; cursor:pointer;
+  font-size:14px; font-family:inherit; white-space:nowrap; }
+button:hover { background:#f5f7fa; }
+button.primary { background:#1a5fb4; border-color:#1a5fb4; color:#fff; }
+button.primary:hover { background:#17509a; }
+button:disabled { opacity:.55; cursor:default; }
+.hint { font-size:12px; color:#8a94a3; line-height:1.9; margin-top:10px; }
+.progress { height:8px; background:#eef1f5; border-radius:5px; overflow:hidden; margin:14px 0 8px; }
+.progress .bar { height:100%; background:#1a5fb4; transition:width .3s; }
+.progress .bar.indeterminate { width:35%; animation:slide 1.2s infinite linear; }
+@keyframes slide { from { margin-left:-35%; } to { margin-left:100%; } }
+.msg { font-size:13px; color:#3c4656; }
+.msg.err { color:#c62828; }
+.ok-card { border:2px solid #a5d6a7; background:#f1f8e9; }
+.ok-card h2 { color:#2e7d32; }
+.divider { text-align:center; color:#b4b2a9; font-size:12px; margin:6px 0 14px; }
+.footer { text-align:center; font-size:12px; color:#8a94a3; padding:8px 0 30px; line-height:1.9; }
+.badge { display:inline-block; background:#eef4fc; color:#1a5fb4; border-radius:20px; padding:2px 10px; font-size:12px; }
+</style>
+</head>
+<body>
+<div id="welcomeApp" v-cloak>
+  <div class="header">
+    <h1>欢迎使用采购下单系统</h1>
+    <div class="sub">先把你自己的合同导入进来，之后每天打开就能直接下单</div>
+  </div>
+
+  <div class="wrap">
+    <div v-if="status.products > 0" class="card ok-card">
+      <h2>数据已就绪</h2>
+      <div class="desc">当前已有 <span class="badge">{{ status.products }} 个产品</span>，可以直接进入系统。</div>
+      <button class="primary" @click="goIndex">进入系统 →</button>
+    </div>
+
+    <template v-else>
+      <div class="card">
+        <h2>第 1 步 · 导入你的合同</h2>
+        <div class="desc">
+          从易快报把合同附件导出到一个文件夹（.docx），然后选中它。
+          系统会读取合同里的产品、供应商、历史价格和图片。
+        </div>
+        <div class="row">
+          <input type="text" v-model="path" placeholder="粘贴合同文件夹路径，或点右侧「浏览…」" :disabled="running">
+          <button @click="pick" :disabled="running || picking">{{ picking ? '选择中…' : '浏览…' }}</button>
+          <button class="primary" @click="startImport" :disabled="running || !path.trim()">
+            {{ running ? '导入中…' : '开始导入' }}
+          </button>
+        </div>
+        <div v-if="running || status.state === 'error' || status.state === 'done'" class="progress">
+          <div class="bar" :class="{ indeterminate: running && !status.total }"
+               :style="{ width: running && status.total ? percent + '%' : '' }"></div>
+        </div>
+        <div class="msg" v-if="status.message">{{ status.message }}</div>
+        <div class="msg err" v-if="status.error">导入失败：{{ status.error }}（原数据未改动）</div>
+        <div class="hint">
+          合同多的时候要几分钟，页面会一直显示进度，不要关闭。<br>
+          导入过程中不会动你原来的数据；解析失败的合同会报告原因。
+        </div>
+      </div>
+
+      <div class="divider">— 或者 —</div>
+
+      <div class="card">
+        <h2>已有数据备份？直接恢复</h2>
+        <div class="desc">
+          如果你之前用过这个系统，选一个备份的 <b>.db</b> 文件恢复即可。
+          恢复前会自动备份当前数据库。
+        </div>
+        <div class="row">
+          <input type="file" accept=".db" @change="onFile" :disabled="restoring">
+          <button class="primary" @click="restore" :disabled="!file || restoring">
+            {{ restoring ? '恢复中…' : '恢复这个备份' }}
+          </button>
+        </div>
+        <div class="msg err" v-if="error">{{ error }}</div>
+        <div class="msg" v-if="note">{{ note }}</div>
+        <div class="hint">备份文件是 data 目录里的 purchase.db，或系统状态面板里下载的备份。</div>
+      </div>
+    </template>
+
+    <div class="footer">
+      所有数据只保存在本机的 data 目录，不会上传到任何服务器。<br>
+      导入完成后，双击「启动网页版.bat」即可日常使用。
+    </div>
+  </div>
+</div>
+
+<script src="vendor/vue.global.prod.js"></script>
+<script src="js/welcome.js"></script>
+</body>
+</html>

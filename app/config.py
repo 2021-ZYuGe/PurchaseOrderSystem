@@ -7,9 +7,21 @@
   运行环境/                                         —— 便携 Python，随包分发
 """
 from pathlib import Path
+import json
 
 ROOT_PATH = Path(__file__).resolve().parent.parent
 ROOT = str(ROOT_PATH)
+
+
+def _read_version_file():
+    """发布包里的 version.json；开发目录没有就回退到内置版本号"""
+    try:
+        return json.loads((ROOT_PATH / 'version.json').read_text(encoding='utf-8'))
+    except Exception:
+        return {}
+
+
+_VERSION_INFO = _read_version_file()
 
 APP_DIR = ROOT_PATH / 'app'
 TOOLS_DIR = ROOT_PATH / '工具'
@@ -39,6 +51,7 @@ STAMP_FILES = [
     'app/domain/contract_doc.py',
     'app/infra/store.py',
     'web/index.html',
+    'web/welcome.html',
     'web/js/app-core.js',
     'web/js/app-contract-status.js',
     'web/js/app-expiry.js',
@@ -46,8 +59,11 @@ STAMP_FILES = [
     'web/js/app-docx.js',
     'web/js/app-main.js',
     'web/js/system-panel.js',
+    'web/js/welcome.js',
     'web/contract.html',
     'web/js/contract-page.js',
 ]
 
-VERSION = '2026-11-13'
+VERSION = str(_VERSION_INFO.get('version') or '2026-11-13')
+SCHEMA_VERSION = int(_VERSION_INFO.get('schema_version') or 3)
+BUILD_TIME = str(_VERSION_INFO.get('build_time') or '')

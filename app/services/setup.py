@@ -1,0 +1,222 @@
+# -*- coding: utf-8 -*-
+"""首次启动向导：导入合同、选择文件夹、从数据库备份恢复。
+
+导入复用现有的解析器子进程（工具/_工具_生成数据库.py），
+服务端只负责传路径、读进度、报结果，不重复实现解析逻辑。
+"""
+import ctypes
+import os
+import re
+import sqlite3
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+from ctypes import wintypes
+from pathlib import Path
+
+import app.config as config
+from app.infra import media, store
+from app.infra.logging import log
+
+MAX_RESTORE_BYTES = 60 * 1024 * 1024
+
+_LOCK = threading.Lock()
+_STATE = {
+    'state': 'idle',        # idle / running / done / error
+    'message': '',
+    'error': '',
+    'done': 0,
+    'total': 0,
+    'started': '',
+    'finished': '',
+}
+
+
+def _set(**kw):
+    with _LOCK:
+        _STATE.update(kw)
+
+
+def status():
+    with _LOCK:
+        data = dict(_STATE)
+    data['products'] = store.product_count()
+    data['need_setup'] = data['products'] == 0
+    return data
+
+
+def import_contracts(folder):
+    """校验路径后启动后台导入；同一时间只允许一个导入任务"""
+    path = str(folder or '').strip().strip('"').strip("'")
+    if not path:
+        return {'ok': False, 'error': '请先选择合同文件夹'}
+    target = Path(path)
+    if not target.is_dir():
+        return {'ok': False, 'error': '找不到这个文件夹：%s' % path}
+    try:
+        docs = sum(1 for _ in target.rglob('*.docx'))
+    except OSError as e:
+        return {'ok': False, 'error': '读取文件夹失败：%s' % e}
+    if docs == 0:
+        return {'ok': False, 'error': '这个文件夹里没有 .docx 合同'}
+
+    with _LOCK:
+        if _STATE['state'] == 'running':
+            return {'ok': False, 'error': '正在导入，请稍候'}
+        _STATE.update({
+            'state': 'running', 'message': '共 %d 份合同，正在解析…' % docs, 'error': '',
+            'done': 0, 'total': docs,
+            'started': time.strftime('%H:%M:%S'), 'finished': '',
+        })
+    threading.Thread(target=_import_worker, args=(target,), daemon=True).start()
+    return {'ok': True}
+
+
+def _import_worker(folder):
+    env = dict(os.environ)
+    env['PYTHONIOENCODING'] = 'utf-8'
+    env['PYTHONUTF8'] = '1'
+    cmd = [sys.executable, str(config.TOOLS_DIR / '_工具_生成数据库.py'), str(folder)]
+    tail = []
+    try:
+        proc = subprocess.Popen(
+            cmd, cwd=config.ROOT, env=env, stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        for raw in iter(proc.stdout.readline, b''):
+            line = raw.decode('utf-8', 'replace').strip()
+            if not line:
+                continue
+            tail.append(line)
+            tail = tail[-8:]
+            m = re.search(r'已处理\s*(\d+)\s*/\s*(\d+)', line)
+            if m:
+                _set(done=int(m.group(1)), total=int(m.group(2)),
+                     message='正在解析合同（%s/%s）…' % (m.group(1), m.group(2)))
+            elif '解析完成' in line or '提取产品' in line:
+                _set(message=line)
+        code = proc.wait()
+        if code == 0 and store.product_count() > 0:
+            media.ensure_migrated()
+            _set(state='done', finished=time.strftime('%H:%M:%S'),
+                 message='导入完成：产品 %d 个，供应商 %d 家'
+                         % (store.product_count(), len(store.list_suppliers_light())))
+            log('首次导入完成：%s' % folder)
+        else:
+            reason = tail[-1] if tail else ('解析器返回码 %s' % code)
+            _set(state='error', error=reason, finished=time.strftime('%H:%M:%S'),
+                 message='导入失败')
+            log('首次导入失败（%s）：%s' % (folder, reason))
+    except Exception as e:
+        _set(state='error', error='%s' % e, finished=time.strftime('%H:%M:%S'),
+             message='导入失败')
+        log('首次导入异常：%r' % (e,))
+
+
+def pick_folder():
+    """弹出 Windows 原生「选择文件夹」对话框；取消返回空串。
+
+    没有 tkinter，所以直接用 shell32 的 SHBrowseForFolderW。
+    """
+    if os.name != 'nt':
+        return ''
+    try:
+        ole32 = ctypes.windll.ole32
+        shell32 = ctypes.windll.shell32
+        user32 = ctypes.windll.user32
+
+        class BROWSEINFOW(ctypes.Structure):
+            _fields_ = [
+                ('hwndOwner', wintypes.HWND),
+                ('pidlRoot', ctypes.c_void_p),
+                ('pszDisplayName', wintypes.LPWSTR),
+                ('lpszTitle', wintypes.LPCWSTR),
+                ('ulFlags', wintypes.UINT),
+                ('lpfn', ctypes.c_void_p),
+                ('lParam', wintypes.LPARAM),
+                ('iImage', ctypes.c_int),
+            ]
+
+        shell32.SHBrowseForFolderW.restype = ctypes.c_void_p
+        shell32.SHBrowseForFolderW.argtypes = [ctypes.POINTER(BROWSEINFOW)]
+        shell32.SHGetPathFromIDListW.restype = wintypes.BOOL
+        shell32.SHGetPathFromIDListW.argtypes = [ctypes.c_void_p, wintypes.LPWSTR]
+        ole32.CoTaskMemFree.argtypes = [ctypes.c_void_p]
+
+        ole32.CoInitialize(None)
+        try:
+            display = ctypes.create_unicode_buffer(1024)
+            bi = BROWSEINFOW()
+            bi.hwndOwner = user32.GetForegroundWindow()
+            bi.pszDisplayName = ctypes.cast(display, wintypes.LPWSTR)
+            bi.lpszTitle = '选择存放合同的文件夹'
+            # 只允许文件系统目录 + 新样式（可拖动、可新建）+ 可手动输入路径
+            bi.ulFlags = 0x0001 | 0x0040 | 0x0010
+            pidl = shell32.SHBrowseForFolderW(ctypes.byref(bi))
+            if not pidl:
+                return ''
+            try:
+                path_buf = ctypes.create_unicode_buffer(2048)
+                if not shell32.SHGetPathFromIDListW(pidl, path_buf):
+                    return ''
+                return path_buf.value
+            finally:
+                ole32.CoTaskMemFree(pidl)
+        finally:
+            ole32.CoUninitialize()
+    except Exception as e:
+        log('选择文件夹对话框失败：%r' % (e,))
+        return ''
+
+
+def restore_database(raw_bytes):
+    """用上传的 .db 覆盖当前库；覆盖前自动备份当前库。"""
+    if not raw_bytes:
+        return {'ok': False, 'error': '没有收到文件'}
+    if len(raw_bytes) > MAX_RESTORE_BYTES:
+        return {'ok': False, 'error': '数据库文件太大（超过 60MB）'}
+
+    tmp_dir = Path(tempfile.mkdtemp(prefix='restore_'))
+    tmp = tmp_dir / 'restore.db'
+    try:
+        tmp.write_bytes(raw_bytes)
+        try:
+            conn = sqlite3.connect(str(tmp))
+            try:
+                integrity = conn.execute('PRAGMA integrity_check').fetchone()[0]
+                tables = {r[0] for r in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'")}
+                row = conn.execute(
+                    "SELECT value FROM schema_meta WHERE key='schema_version'").fetchone() \
+                    if 'schema_meta' in tables else None
+            finally:
+                conn.close()
+        except sqlite3.DatabaseError:
+            return {'ok': False, 'error': '这不是有效的数据库文件'}
+
+        if integrity != 'ok':
+            return {'ok': False, 'error': '数据库校验失败：%s' % integrity}
+        if not {'products', 'suppliers'}.issubset(tables):
+            return {'ok': False, 'error': '这个文件不是本系统的数据库'}
+        version = int(row[0]) if row else 0
+        if version > int(store.SCHEMA_VERSION):
+            return {'ok': False, 'error': '备份来自更新版本（数据 v%d），请升级程序后再恢复' % version}
+
+        if Path(store.DB_PATH).exists():
+            store.backup_database('before_restore')
+        store.restore_database(str(tmp))
+        store.ensure_database()
+        store.clear_pending_cache()
+        media.ensure_migrated()
+        log('已从上传的数据库恢复：产品 %d 个' % store.product_count())
+        return {'ok': True, 'products': store.product_count()}
+    finally:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        try:
+            tmp_dir.rmdir()
+        except OSError:
+            pass

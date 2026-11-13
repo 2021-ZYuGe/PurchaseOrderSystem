@@ -19,6 +19,7 @@
       const loading = ref(false);
       const error = ref('');
       const info = ref(null);
+      const note = ref('');
 
       async function load() {
         loading.value = true;
@@ -41,6 +42,25 @@
         open.value = false;
       }
 
+      async function backupNow() {
+        note.value = '';
+        try {
+          const data = await fetchJSON('/api/backup/now', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: '{}',
+          });
+          note.value = data.name ? ('已备份：' + data.name) : '当前还没有数据库，无需备份';
+          await load();
+        } catch (e) {
+          note.value = '备份失败：' + (e.message || e);
+        }
+      }
+
+      function downloadDb() {
+        location.href = '/api/backup/download';
+      }
+
       const rows = computed(() => {
         const d = info.value;
         if (!d) return [];
@@ -54,7 +74,8 @@
         ];
       });
 
-      return { open, loading, error, info, rows, show, close, load };
+      return { open, loading, error, info, rows, note, show, close, load,
+               backupNow, downloadDb };
     },
     template: `
       <a class="btn-expiry" href="javascript:;" @click="show">系统状态</a>
@@ -77,7 +98,11 @@
               </div>
             </template>
           </div>
+          <div class="sys-note" v-if="note">{{ note }}</div>
           <div class="sys-foot">
+            <button type="button" class="sys-btn" @click="backupNow">立即备份</button>
+            <button type="button" class="sys-btn" @click="downloadDb">下载数据库</button>
+            <span class="sys-spacer"></span>
             <button type="button" class="sys-btn" @click="load" :disabled="loading">
               {{ loading ? '读取中…' : '刷新' }}
             </button>

@@ -19,9 +19,11 @@ if __package__ in (None, ''):                 # 允许直接 python app/infra/st
     import sys
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from app.config import BACKUP_DIR, DATA_DIR, DATA_JS, DB_PATH, ROOT_PATH as ROOT
+from app.config import (BACKUP_DIR, DATA_DIR, DATA_JS, DB_PATH,
+                        SCHEMA_VERSION as CONFIG_SCHEMA_VERSION,
+                        ROOT_PATH as ROOT)
 
-SCHEMA_VERSION = "3"
+SCHEMA_VERSION = str(CONFIG_SCHEMA_VERSION)
 WRITE_LOCK = threading.RLock()
 
 
@@ -1495,6 +1497,21 @@ def _migrate_legacy(conn):
 def ensure_database():
     """首次启动自动迁移；标记检查和迁移在同一立即写事务中。"""
     existed = DB_PATH.exists()
+    if existed:
+        # 旧版程序打开新版数据会写坏结构：宁可拒绝启动，也不能静默降级。
+        try:
+            with closing(connect()) as probe:
+                row = probe.execute(
+                    "SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()
+            existing = int(row[0]) if row else 0
+        except Exception:
+            existing = 0
+        if existing > int(SCHEMA_VERSION):
+            raise RuntimeError(
+                '数据来自更新版本的程序（数据结构 v%d，本程序只支持 v%s）。\n'
+                '请使用新版程序打开，或先从 data\\backups 恢复旧备份。'
+                % (existing, SCHEMA_VERSION))
+
     with WRITE_LOCK, interprocess_lock(DB_PATH.with_name(DB_PATH.name + ".init.lock")):
         with session() as conn:
             conn.execute("PRAGMA journal_mode = WAL")

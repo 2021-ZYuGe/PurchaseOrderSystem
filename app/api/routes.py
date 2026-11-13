@@ -12,7 +12,9 @@ import traceback
 from app.infra import store as sqlite_store
 from app.infra.logging import log
 from app.services import archive as archive_service
+from app.services import backup as backup_service
 from app.services import contracts as contract_service
+from app.services import setup as setup_service
 from app.services import sync as sync_service
 from app.services import system as system_service
 
@@ -23,6 +25,8 @@ GET_PATHS = (
     '/api/products',
     '/api/suppliers',
     '/api/system/info',
+    '/api/setup/status',
+    '/api/backups',
     '/api/contract_status',
     '/api/sync_status',
     '/api/contract_expiry',
@@ -59,6 +63,21 @@ def dispatch(path, payload=None):
 
         if path == '/api/system/info':
             return {'ok': True, 'data': system_service.info()}
+
+        if path == '/api/setup/status':
+            return {'ok': True, 'data': setup_service.status()}
+
+        if path == '/api/setup/import':
+            return setup_service.import_contracts(p.get('path'))
+
+        if path == '/api/setup/pick_folder':
+            return {'ok': True, 'data': {'path': setup_service.pick_folder()}}
+
+        if path == '/api/backups':
+            return {'ok': True, 'data': {'items': backup_service.list_backups()}}
+
+        if path == '/api/backup/now':
+            return {'ok': True, 'data': backup_service.manual()}
 
         if path == '/api/archive':
             return {'ok': True, 'data': archive_service.load_archive()}
