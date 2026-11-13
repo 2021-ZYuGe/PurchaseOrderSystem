@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>主合同（新签 / 续签）- 兴趣岛采购</title>
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="shortcut icon" type="image/x-icon" href="/favicon.ico">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:"Microsoft YaHei",sans-serif;background:#f0f2f5;color:#1f2329;font-size:14px}
+.header{background:#1a5fb4;color:#fff;padding:14px 28px;display:flex;justify-content:space-between;align-items:center}
+.header h1{font-size:18px;font-weight:600}
+.header .sub{font-size:12px;opacity:.8;margin-top:2px}
+.back{color:#fff;text-decoration:none;font-size:13px;border:1px solid rgba(255,255,255,.5);padding:6px 14px;border-radius:6px}
+.back:hover{background:rgba(255,255,255,.15)}
+.wrap{max-width:1180px;margin:20px auto;padding:0 20px 60px}
+.card{background:#fff;border-radius:10px;padding:20px 24px;margin-bottom:16px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+.card h2{font-size:15px;font-weight:600;margin-bottom:14px;color:#1a5fb4;display:flex;align-items:center;gap:8px}
+.card h2 .step{background:#1a5fb4;color:#fff;width:22px;height:22px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:12px}
+.row{display:flex;gap:14px;flex-wrap:wrap}
+.field{flex:1;min-width:230px;margin-bottom:12px}
+.field.full{flex-basis:100%}
+.field label{display:block;font-size:12px;color:#5f6b7a;margin-bottom:5px}
+.field label .req{color:#e53935;font-weight:700;cursor:help;position:relative}
+.field label .req::after{content:attr(data-tip);position:absolute;left:50%;bottom:160%;transform:translateX(-50%);background:#2b3440;color:#fff;font-size:11px;font-weight:400;line-height:1.4;padding:4px 8px;border-radius:4px;white-space:nowrap;opacity:0;visibility:hidden;pointer-events:none;transition:opacity .12s;z-index:30}
+.field label .req:hover::after{opacity:1;visibility:visible}
+.field input,.field select{width:100%;padding:9px 11px;border:1px solid #d5dbe3;border-radius:7px;font-size:14px;font-family:inherit}
+.field input[readonly]{background:#f4f6f9;color:#5f6b7a;cursor:default}
+.field input:focus,.field select:focus{outline:none;border-color:#1a5fb4;box-shadow:0 0 0 2px rgba(26,95,180,.12)}
+.hint{font-size:12px;color:#8a94a3;margin-top:6px;line-height:1.6}
+.mode{display:flex;gap:14px;flex-wrap:wrap}
+.mode-opt{flex:1;min-width:260px;border:2px solid #d5dbe3;border-radius:10px;padding:14px 18px;cursor:pointer;transition:all .15s}
+.mode-opt:hover{border-color:#7fabdc}
+.mode-opt.active{border-color:#1a5fb4;background:#eef4fc}
+.mode-opt .mt{font-weight:600;font-size:15px;margin-bottom:4px}
+.mode-opt .md{font-size:12px;color:#8a94a3;line-height:1.5}
+.pay-modes{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px}
+.pay-mode{padding:8px 14px;border:1px solid #d5dbe3;border-radius:7px;font-size:13px;cursor:pointer;transition:all .15s;background:#fff;color:#3c4858}
+.pay-mode:hover{border-color:#7fabdc}
+.pay-mode.active{border-color:#1a5fb4;background:#eef4fc;color:#1a5fb4;font-weight:600}
+.pay-mode.disabled{opacity:.45;cursor:not-allowed}
+.btn{padding:11px 26px;border-radius:8px;border:none;font-size:14px;cursor:pointer;font-family:inherit;font-weight:500}
+.btn-primary{background:#1a5fb4;color:#fff}
+.btn-primary:hover{background:#154a8f}
+.btn-primary:disabled{background:#a8c3e3;cursor:not-allowed}
+.btn-ghost{background:#fff;color:#1a5fb4;border:1px solid #1a5fb4}
+.btn-green{background:#1e8e3e;color:#fff}
+.actions{display:flex;gap:12px;justify-content:flex-end;margin-top:18px;flex-wrap:wrap}
+.picked{background:#e8f5e9;border:1px solid #a5d6a7;border-radius:8px;padding:10px 14px;font-size:13px;color:#256029;margin-bottom:12px;display:none}
+.picked.show{display:block}
+.msg{padding:12px 16px;border-radius:8px;font-size:13px;margin-bottom:14px;display:none}
+.msg.show{display:block}
+.msg.ok{background:#e8f5e9;color:#256029;border:1px solid #a5d6a7}
+.msg.err{background:#fdecea;color:#c0392b;border:1px solid #f5c6c2}
+.sec-title{font-size:13px;color:#8a94a3;border-top:1px dashed #e2e8f0;padding-top:14px;margin:14px 0 4px}
+.tag-new{background:#e53935;color:#fff;font-size:11px;padding:1px 7px;border-radius:9px;margin-left:6px}
+.tag-old{background:#1e8e3e;color:#fff;font-size:11px;padding:1px 7px;border-radius:9px;margin-left:6px}
+</style>
+</head>
+<body>
+<div class="header">
+  <div><h1>主合同 · 新签 / 续签</h1><div class="sub">选供应商 → 信息自动带入 → 一键出 Word，格式与法务模板一致</div></div>
+  <a class="back" href="/index.html">← 回下单系统</a>
+</div>
+<div class="wrap">
+
+  <div class="card">
+    <h2><span class="step">1</span>这次是哪种情况</h2>
+    <div class="mode" id="modeBox">
+      <div class="mode-opt" data-mode="renew">
+        <div class="mt">续签 / 到期重签<span class="tag-old">老供应商</span></div>
+        <div class="md">以前签过（在档案里能搜到）→ 联系人、地址、电话、邮箱、公户信息全自动带回来，你只改日期</div>
+      </div>
+      <div class="mode-opt" data-mode="new">
+        <div class="mt">首次签约<span class="tag-new">新供应商</span></div>
+        <div class="md">第一次合作 → 把对方给的信息填一遍；生成后自动存进档案，下次续签就不用再问了</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" id="cardPick" style="display:none">
+    <h2><span class="step">2</span>选供应商</h2>
+    <div class="field">
+      <label>输入公司名搜索（支持模糊匹配）</label>
+      <input id="supInput" list="supList" placeholder="如：深圳骐思创新电子科技有限公司" autocomplete="off">
+      <datalist id="supList"></datalist>
+      <div class="hint">档案里共 <b id="archCount">0</b> 家历史供应商。搜不到说明以前没签过这类合同，切到「首次签约」手填即可。</div>
+    </div>
+    <div class="picked" id="pickedBox"></div>
+  </div>
+
+  <div class="card">
+    <h2><span class="step">3</span>合同类型</h2>
+    <div class="mode" id="typeBox">
+      <div class="mode-opt active" data-type="batch">
+        <div class="mt">一次性发货（批采）</div>
+        <div class="md">货一次性发到我方仓库，适用于大批量采购；使用集采模式合同模板</div>
+      </div>
+      <div class="mode-opt" data-type="dropship">
+        <div class="mt">一件代发</div>
+        <div class="md">供应商按单直发给客户，按月结算</div>
+      </div>
+      <div class="mode-opt" data-type="simple">
+        <div class="mt">单次简易版</div>
+        <div class="md">单次采购、一次结清，使用《产品订购协议》简易模板</div>
+      </div>
+    </div>
+    <div class="hint" id="reqHint" style="margin-top:10px;color:#b7791f"></div>
+  </div>
+
+  <div class="card">
+    <h2><span class="step">4</span>乙方（供应商）信息</h2>
+    <div class="row">
+      <div class="field full"><label>公司全称 <span class="req" data-tip="该项为必填项">*</span></label><input id="b_name" placeholder="须与营业执照一致"></div>
+      <div class="field"><label>统一社会信用代码 <span class="req dyn-req" data-req="batch" data-tip="该项为必填项">*</span></label><input id="b_credit_code"></div>
+      <div class="field"><label>联系人 <span class="req dyn-req" data-req="batch simple" data-tip="该项为必填项">*</span></label><input id="b_contact"></div>
+      <div class="field"><label>联系电话 <span class="req dyn-req" data-req="batch simple" data-tip="该项为必填项">*</span></label><input id="b_tel"></div>
+      <div class="field"><label>联系邮箱 <span class="req dyn-req" data-req="batch simple" data-tip="该项为必填项">*</span></label><input id="b_email"></div>
+      <div class="field"><label>微信号</label><input id="b_wechat"></div>
+      <div class="field full"><label>联系地址 <span class="req" data-tip="该项为必填项">*</span></label><input id="b_addr" placeholder="须能收寄快递"></div>
+      <div class="sec-title" style="flex-basis:100%">收款账户（必须对公）</div>
+      <div class="field full"><label>开户名称</label><input id="b_bank_name" placeholder="一般就是公司全称"></div>
+      <div class="field"><label>对公账号 <span class="req" data-tip="该项为必填项">*</span></label><input id="b_bank_account"></div>
+      <div class="field"><label>开户行 <span class="req" data-tip="该项为必填项">*</span></label><input id="b_bank_open" placeholder="精确到支行"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2><span class="step">5</span>甲方（我方）信息<span style="font-size:12px;color:#8a94a3;font-weight:400">　已预填默认信息，改动会自动记住</span></h2>
+    <div class="row">
+      <div class="field full"><label>公司名称</label>
+        <select id="a_name" onchange="syncPartyACode()">
+          <option value="广州兴趣岛信息科技有限公司" selected>广州兴趣岛信息科技有限公司</option>
+          <option value="广州普惠优品电子商贸有限公司">广州普惠优品电子商贸有限公司</option>
+        </select>
+      </div>
+      <div class="field"><label>统一社会信用代码</label><input id="a_credit_code" value="91440104MA59C33C5N" readonly title="随公司名称自动带出"></div>
+      <div class="field"><label>联系人</label><input id="a_contact" value="简丽冰"></div>
+      <div class="field"><label>联系电话</label><input id="a_tel" value="15814464431"></div>
+      <div class="field"><label>联系邮箱</label><input id="a_email" value="457263395@qq.com"></div>
+      <div class="field"><label>联系地址</label><input id="a_addr" value="广州市天河区奥体南路9号兴创楼二楼203供应链组"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2><span class="step">6</span>签约与商务条款</h2>
+    <div class="row">
+      <div class="field"><label>签约日期</label><input id="s_date" type="date"></div>
+      <div class="field" id="fYears"><label>合同期限（年）</label><input id="s_years" value="1"></div>
+      <div class="field"><label>签署地</label><input id="s_place" value="广州市天河区"></div>
+      <div class="field" id="fAmount"><label>本次订单总金额（元） <span class="req" data-tip="该项为必填项">*</span></label>
+        <input id="t_order_amount" placeholder="如：12500 或 12500.50">
+        <div class="hint">续签选供应商后自动带入最近一份合同的金额，可修改；批采取附件2、简易版同时生成大写；代发不用填。</div>
+      </div>
+
+      <div id="payModeBox" style="flex-basis:100%">
+        <div class="sec-title">付款方式</div>
+        <div class="row">
+          <div class="field" id="fPayThreshold" style="max-width:340px">
+            <label>预付款起订金额（元）</label>
+            <input id="t_pay_threshold" type="number" min="0" step="1000" value="70000">
+            <div class="hint">订单总金额达到此金额，才可选择预付款方式。</div>
+          </div>
+        </div>
+        <div class="pay-modes" id="payModes">
+          <div class="pay-mode active" data-pay="full">全款</div>
+          <div class="pay-mode" data-pay="p30">预付款 30% · 尾款 70%</div>
+          <div class="pay-mode" data-pay="p50">预付款 50% · 尾款 50%</div>
+        </div>
+        <div class="hint" id="payModeNote"></div>
+      </div>
+
+      <div class="sec-title" style="flex-basis:100%">以下已按你的习惯预填，可临时改</div>
+      <div class="field"><label>开票税率</label><input id="t_tax_rate" value="13%"></div>
+      <div class="field"><label>发票类型</label>
+        <select id="t_invoice_type"><option value="专票" selected>增值税专用发票</option><option value="普票">增值税普通发票</option></select>
+      </div>
+      <div class="field" id="fInvoiceDays"><label>开票期限（工作日）</label><input id="t_invoice_days" value="15"></div>
+      <div class="field" id="fPayDays"><label>付款期限（工作日）</label><input id="t_pay_days" value="15"></div>
+      <div class="field"><label>交货周期（自然日）</label><input id="t_delivery_days" value="10"></div>
+      <div class="field" id="fRecon" style="display:none"><label>对账确认（工作日）</label><input id="t_reconcile_days" value="2"></div>
+      <div class="field" id="fInvPct" style="display:none">
+        <label>无效发货占比上限（%）</label><input id="t_invalid_order_pct" value="5">
+        <div class="hint">超过该比例甲方可无条件解约。<b>历史合同里没人填过</b>，默认 5%，可与法务确认后改。</div>
+      </div>
+      <div class="field"><label>交货地址（附件2用）</label><input id="t_delivery_addr" placeholder="留空则保持模板原样"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="msg" id="msg"></div>
+    <div class="actions">
+      <button class="btn btn-ghost" onclick="exportInfo()">导出信息收集表（发给对方填）</button>
+      <button class="btn btn-ghost" onclick="saveOnly()">仅存入档案</button>
+      <button class="btn btn-primary" id="btnGen" onclick="generate()">生成合同 Word</button>
+    </div>
+    <div class="hint" style="text-align:right">生成后请务必打开核对：公司名、账号、税额、金额、日期这几项。</div>
+  </div>
+
+</div>
+
+<script>
+let MODE = '', TYPE = 'batch', ARCH = [];   // 第 1 步未选之前为空，避免「选供应商」还没出现就冒出一个 3
+let PAY_MODE = 'full', PAY_THRESHOLD = 70000;
+
+function $(id){ return document.getElementById(id); }
+function get(id){ return ($(id) || {}).value || ''; }
+function money0(n){ return Number(n).toLocaleString('zh-CN', {maximumFractionDigits:0}); }
+
+// 甲方公司 -> 统一社会信用代码（一一对应）
+const PARTY_A_CODES = {
+  '广州兴趣岛信息科技有限公司': '91440104MA59C33C5N',
+  '广州普惠优品电子商贸有限公司': '91440106MA7LKA4517'
+};
+function syncPartyACode(){
+  const code = PARTY_A_CODES[get('a_name')] || '';
+  if ($('a_credit_code')) $('a_credit_code').value = code;
+}
+
+// ---- 模式 / 类型切换 ----
+// 步骤号跟着当前显示的卡片走：首次签约没有「选供应商」这一步，后面的编号要整体前移，
+// 不能出现 1 → 3 的跳号；没选第 1 步时，合同类型排第 2。
+function renumberSteps(){
+  let n = 0;
+  document.querySelectorAll('.card').forEach(card => {
+    const badge = card.querySelector('h2 .step');
+    if (!badge || !card.offsetParent) return;   // 没有序号 / 当前隐藏的卡片不占号
+    badge.textContent = String(++n);
+  });
+}
+
+document.getElementById('modeBox').onclick = function(e){
+  const el = e.target.closest('.mode-opt'); if(!el) return;
+  MODE = el.dataset.mode;
+  [...this.children].forEach(c => c.classList.toggle('active', c === el));
+  $('cardPick').style.display = MODE === 'renew' ? '' : 'none';
+  if (MODE === 'new') { $('pickedBox').classList.remove('show'); clearB(); }
+  renumberSteps();
+};
+// 每种合同类型对应模板里黄色高亮、必须由用户填写的字段
+const REQUIRED = {
+  batch: [
+    ['b_name','公司全称'], ['b_credit_code','统一社会信用代码'],
+    ['b_contact','联系人'], ['b_tel','联系电话'], ['b_email','联系邮箱'], ['b_addr','联系地址'],
+    ['b_bank_name','开户名称'], ['b_bank_account','对公账号'], ['b_bank_open','开户行'],
+    ['s_date','签约日期'], ['s_years','合同期限（年）'], ['t_order_amount','本次订单总金额']
+  ],
+  simple: [
+    ['b_name','公司全称'], ['b_contact','联系人'], ['b_tel','联系电话'], ['b_email','联系邮箱'],
+    ['b_addr','联系地址'], ['b_bank_name','开户名称'], ['b_bank_account','开户账号'], ['b_bank_open','开户行'],
+    ['s_date','签约日期'], ['t_order_amount','本次订单总金额']
+  ],
+  dropship: [
+    ['b_name','公司全称'], ['b_addr','联系地址'], ['b_bank_account','对公账号'],
+    ['b_bank_open','开户行'], ['s_date','签约日期']
+  ]
+};
+const REQ_HINT = {
+  batch: '批采必填（对应模板黄色高亮）：公司全称、信用代码、联系人、电话、邮箱、地址、开户名称、对公账号、开户行、订单总金额、合同期限。',
+  simple: '简易版必填（对应模板黄色高亮）：公司全称、联系人、电话、邮箱、地址、开户名称、开户账号、开户行、订单总金额。',
+  dropship: '一件代发必填：公司全称、联系地址、对公账号、开户行、签约日期。'
+};
+
+function updateReqMarks(){
+  document.querySelectorAll('.dyn-req').forEach(el => {
+    const types = (el.dataset.req || '').split(/\s+/);
+    el.style.display = types.includes(TYPE) ? '' : 'none';
+  });
+}
+
+function updateTypeUI(){
+  const dropship = TYPE === 'dropship';
+  $('fRecon').style.display = dropship ? '' : 'none';
+  $('fInvPct').style.display = dropship ? '' : 'none';
+  $('fYears').style.display = TYPE === 'simple' ? 'none' : '';   // 简易版没有合同期限
+  $('fAmount').style.display = dropship ? 'none' : '';
+  // 批采 / 简易版：付款条款按所选模式固定生成；代发仍用原来的账期字段
+  $('payModeBox').style.display = dropship ? 'none' : '';
+  $('fInvoiceDays').style.display = dropship ? '' : 'none';
+  $('fPayDays').style.display = dropship ? '' : 'none';
+  if (dropship) PAY_MODE = 'full';
+  $('reqHint').textContent = REQ_HINT[TYPE] || '';
+  updateReqMarks();
+  updatePayModeUI();
+}
+
+function updatePayModeUI(){
+  const total = parseFloat(get('t_order_amount').replace(/,/g, '')) || 0;
+  const below = !total || total < PAY_THRESHOLD;
+  const opts = $('payModes').querySelectorAll('.pay-mode');
+  opts.forEach(o => {
+    const isFull = o.dataset.pay === 'full';
+    const restricted = below && !isFull;
+    o.classList.toggle('disabled', restricted);
+    if (restricted && PAY_MODE === o.dataset.pay) PAY_MODE = 'full';
+  });
+  if (below) PAY_MODE = 'full';
+  opts.forEach(o => o.classList.toggle('active', o.dataset.pay === PAY_MODE));
+  const note = $('payModeNote');
+  if (!total) note.textContent = '先填写本次订单总金额，再选择付款方式。';
+  else if (below) note.textContent = `订单总金额 ${money0(total)} 元 ＜ ${money0(PAY_THRESHOLD)} 元，只能全款。`;
+  else note.textContent = `订单总金额 ${money0(total)} 元 ≥ ${money0(PAY_THRESHOLD)} 元，可选择预付款方式。`;
+}
+
+function initPayMode(){
+  const v = parseFloat(localStorage.getItem('payThreshold'));
+  PAY_THRESHOLD = Number.isFinite(v) && v >= 0 ? v : 70000;
+  $('t_pay_threshold').value = String(PAY_THRESHOLD);
+  $('t_pay_threshold').addEventListener('input', () => {
+    const n = parseFloat($('t_pay_threshold').value);
+    PAY_THRESHOLD = Number.isFinite(n) && n >= 0 ? n : 0;
+    localStorage.setItem('payThreshold', String(PAY_THRESHOLD));
+    updatePayModeUI();
+  });
+  $('t_order_amount').addEventListener('input', updatePayModeUI);
+  $('payModes').addEventListener('click', e => {
+    const opt = e.target.closest('.pay-mode');
+    if (!opt || opt.classList.contains('disabled')) return;
+    PAY_MODE = opt.dataset.pay;
+    updatePayModeUI();
+  });
+}
+
+document.getElementById('typeBox').onclick = function(e){
+  const el = e.target.closest('.mode-opt'); if(!el) return;
+  TYPE = el.dataset.type;
+  [...this.children].forEach(c => c.classList.toggle('active', c === el));
+  updateTypeUI();
+};
+
+// ---- 档案 ----
+fetch('/api/archive', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'})
+  .then(r => r.json()).then(j => {
+    if (!j.ok) return;
+    ARCH = (j.data && j.data.suppliers) || [];
+    $('archCount').textContent = ARCH.length;
+    const dl = $('supList');
+    ARCH.forEach(s => { const o = document.createElement('option'); o.value = s.name; dl.appendChild(o); });
+    const pa = (j.data && j.data.party_a) || {};
+    // v2：旧的 partyA 里可能存着过期信息，首次打开先显示页面预填的默认甲方信息
+    const saved = JSON.parse(localStorage.getItem('partyA_v2') || '{}');
+    // 只覆盖有值的字段：空值保留页面预填的默认甲方信息
+    ['name','credit_code','contact','tel','email','addr'].forEach(k => {
+      const el = $('a_' + k);
+      if (!el) return;
+      const v = String(saved[k] || pa[k] || '').trim();
+      if (v) el.value = v;
+    });
+    if (!get('a_name')) $('a_name').value = '广州兴趣岛信息科技有限公司';
+    syncPartyACode();
+  }).catch(()=>{});
+
+$('supInput').addEventListener('change', pickSup);
+$('supInput').addEventListener('input', function(){
+  const v = this.value.trim();
+  if (!v) return;
+  const hit = ARCH.find(s => s.name === v);
+  if (hit) pickSup();
+});
+function pickSup(){
+  const v = $('supInput').value.trim();
+  const hit = ARCH.find(s => s.name === v) || ARCH.find(s => s.name.includes(v) && v.length > 3);
+  if (!hit) return;
+  fillB(hit);
+  const amtTxt = hit.last_order_amount
+    ? '；最近合同金额 ¥' + Number(hit.last_order_amount).toLocaleString('zh-CN', {minimumFractionDigits:2, maximumFractionDigits:2})
+      + (hit.last_order_date ? '（' + hit.last_order_date + '）' : '')
+    : '';
+  $('pickedBox').innerHTML = '已带入 <b>' + hit.name + '</b> 的历史信息'
+    + (hit.last_sign ? '（上次签约：' + hit.last_sign + '）' : '')
+    + amtTxt
+    + '。<br>请重点核对：账号、开户行、税率、金额、这次的签约日期。'
+    + expiryTip(hit.name);
+  $('pickedBox').classList.add('show');
+}
+
+// 当前合同还剩多久到期：续签时用于确认是不是该续了
+let EXPIRY_MAP = {};
+fetch('/api/contract_expiry', {cache:'no-store'})
+  .then(r => r.json())
+  .then(j => {
+    if (!j || !j.ok || !j.data) return;
+    (j.data.items || []).forEach(it => { EXPIRY_MAP[it.供应商] = it; });
+  }).catch(() => {});
+
+function expiryTip(name){
+  const ex = EXPIRY_MAP[name];
+  if (!ex || !ex.到期日) return '';
+  const dl = ex.剩余天数;
+  const txt = dl < 0 ? '已过期 ' + (-dl) + ' 天' : '剩 ' + dl + ' 天';
+  const color = dl < 0 ? '#c62828' : (dl <= 30 ? '#b26a00' : '#1b5e20');
+  return '<div style="margin-top:8px;padding-top:8px;border-top:1px dashed rgba(0,0,0,.12);'
+    + 'color:' + color + ';font-weight:600">当前合同：' + (ex.起始日 ? ex.起始日 + ' 至 ' : '至 ')
+    + ex.到期日 + '（' + txt + '）'
+    + (dl <= 30 ? '，建议按续签办理' : '') + '</div>';
+}
+function fillB(s){
+  ['name','credit_code','contact','tel','email','wechat','addr','bank_name','bank_account','bank_open']
+    .forEach(k => { const el = $('b_' + k); if (el) el.value = s[k] || ''; });
+  // 开户名称默认等于公司全称，避免档案里没存这一项时留空
+  if (!$('b_bank_name').value.trim()) $('b_bank_name').value = s.name || '';
+  // 续签：带入该供应商最近一份合同的订单总金额，用户仍可改
+  $('t_order_amount').value = s.last_order_amount ? String(s.last_order_amount) : '';
+  updatePayModeUI();
+}
+$('b_name').addEventListener('change', function(){
+  const bn = $('b_bank_name');
+  if (bn && !bn.value.trim()) bn.value = this.value.trim();
+});
+function clearB(){
+  ['name','credit_code','contact','tel','email','wechat','addr','bank_name','bank_account','bank_open']
+    .forEach(k => { const el = $('b_' + k); if (el) el.value = ''; });
+  $('t_order_amount').value = '';
+  updatePayModeUI();
+}
+
+// ---- 甲方记忆 ----
+['name','credit_code','contact','tel','email','addr'].forEach(k => {
+  const el = $('a_' + k);
+  if (el) el.addEventListener('change', () => {
+    const o = {}; ['name','credit_code','contact','tel','email','addr'].forEach(x => o[x] = get('a_' + x));
+    localStorage.setItem('partyA_v2', JSON.stringify(o));
+  });
+});
+
+// ---- 收集数据 ----
+function collect(){
+  return {
+    contract_type: TYPE,
+    remember: MODE === 'new',
+    party_a: { name:get('a_name'), credit_code:get('a_credit_code'), contact:get('a_contact'),
+               tel:get('a_tel'), email:get('a_email'), addr:get('a_addr') },
+    party_b: { name:get('b_name'), credit_code:get('b_credit_code'),
+               contact:get('b_contact'), tel:get('b_tel'), email:get('b_email'), wechat:get('b_wechat'),
+               addr:get('b_addr'), bank_name:get('b_bank_name'),
+               bank_account:get('b_bank_account'), bank_open:get('b_bank_open') },
+    sign: { date:get('s_date'), years:get('s_years'), place:get('s_place') },
+    terms: { tax_rate:get('t_tax_rate'), invoice_type:get('t_invoice_type'),
+             invoice_days:get('t_invoice_days'), pay_days:get('t_pay_days'),
+             delivery_days:get('t_delivery_days'), reconcile_days:get('t_reconcile_days'),
+             invalid_order_pct:get('t_invalid_order_pct'),
+             delivery_addr:get('t_delivery_addr'),
+             order_amount:get('t_order_amount').replace(/,/g,'').trim(),
+             pay_mode: PAY_MODE }
+  };
+}
+function show(cls, text){ const m = $('msg'); m.className = 'msg show ' + cls; m.innerHTML = text; }
+
+function post(url, payload){
+  return fetch(url, {method:'POST', headers:{'Content-Type':'application/json'},
+                     body: JSON.stringify(payload)})
+    .then(r => r.text())
+    .then(text => {
+      try { return JSON.parse(text); }
+      catch (e) {
+        // 静态预览服务（python -m http.server）不支持 POST，会返回一段 HTML，
+        // 直接 r.json() 只会报“Unexpected token '<'”，这里换成能看懂的提示。
+        return {ok:false, error:'当前页面是“网页预览”模式，只能浏览网页，不能生成合同。'
+          + '请关闭本页，双击文件夹里的「启动网页版.bat」重新启动系统后再试。'};
+      }
+    });
+}
+
+function validateForGenerate(){
+  // 开户名称默认跟公司全称，避免用户重复输入
+  if (!$('b_bank_name').value.trim() && $('b_name').value.trim()) {
+    $('b_bank_name').value = $('b_name').value.trim();
+  }
+  const missing = [];
+  let first = null;
+  (REQUIRED[TYPE] || []).forEach(([id, label]) => {
+    const el = $(id);
+    if (el && !String(el.value || '').trim()) {
+      missing.push(label);
+      if (!first) first = el;
+    }
+  });
+  if (missing.length) {
+    show('err', '以下必填项还没填（对应模板里的黄色高亮）：<b>' + missing.join('、') + '</b>');
+    if (first) {
+      first.focus();
+      try { first.scrollIntoView({block:'center', behavior:'smooth'}); } catch (e) {}
+    }
+    return false;
+  }
+  if (TYPE !== 'dropship') {
+    const raw = get('t_order_amount').replace(/,/g, '').trim();
+    if (!/^\d+(\.\d{1,2})?$/.test(raw) || parseFloat(raw) <= 0) {
+      show('err', '本次订单总金额请填数字，例如 12500 或 12500.50。');
+      $('t_order_amount').focus();
+      return false;
+    }
+  }
+  if (TYPE === 'batch' && !/^[1-9]\d*$/.test(get('s_years').trim())) {
+    show('err', '合同期限请填正整数年数，例如 1。');
+    $('s_years').focus();
+    return false;
+  }
+  const numFields = [['t_delivery_days', '交货周期']];
+  if (TYPE === 'dropship') numFields.push(['t_invoice_days', '开票期限'], ['t_pay_days', '付款期限']);
+  for (const [id, label] of numFields) {
+    if (!/^\d+$/.test(get(id).trim())) {
+      show('err', label + '请填数字。');
+      $(id).focus();
+      return false;
+    }
+  }
+  return true;
+}
+
+function generate(){
+  if (!MODE) {
+    show('err', '先在第 1 步选一下：这次是「续签 / 到期重签」还是「首次签约」。选完步骤号会自动排好，新供应商的信息也才会存进档案。');
+    try { $('modeBox').scrollIntoView({block:'center', behavior:'smooth'}); } catch (e) {}
+    return;
+  }
+  if (!validateForGenerate()) return;
+  $('btnGen').disabled = true; $('btnGen').textContent = '生成中…';
+  post('/api/make_contract', collect()).then(r => {
+    $('btnGen').disabled = false; $('btnGen').textContent = '生成合同 Word';
+    if (!r.ok) { show('err','生成失败：' + (r.error || '未知错误')); return; }
+    let tip = '已生成 <b>' + r.name + '</b>，正在下载…<br>打开看一下，重点核对：公司名 / 账号 / 开户行 / 税率 / 金额 / 日期。';
+    if (r.todo && r.todo.length) {
+      tip += '<br><b style="color:#b7791f">还有 ' + r.todo.length +
+             ' 处要你手工确认</b>（模板里没有默认值的条款）：<ul style="margin:6px 0 0 18px">';
+      r.todo.forEach(t => { tip += '<li>' + String(t).replace(/</g,'&lt;').slice(0,80) + '</li>'; });
+      tip += '</ul>';
+    }
+    tip += (MODE === 'new' ? '<br>这家供应商的信息已自动存入档案，下次续签直接搜名字就能带出来。' : '');
+    show('ok', tip);
+    setTimeout(() => { location.href = r.url; }, 600);
+  }).catch(e => {
+    $('btnGen').disabled = false; $('btnGen').textContent = '生成合同 Word';
+    show('err','连接服务失败：' + e + '<br>请关闭本页，双击文件夹里的「启动网页版.bat」重新启动系统。');
+  });
+}
+
+function exportInfo(){
+  const p = collect();
+  if (!p.party_b.name) { show('err','先填一下乙方公司名，收集表上会带上名字。'); return; }
+  post('/api/make_info_sheet', p).then(r => {
+    if (!r.ok) { show('err','失败：' + (r.error || '')); return; }
+    show('ok','<b>' + r.name + '</b> 已生成，正在下载。<br>直接微信发给对方，让他照着填回来。');
+    setTimeout(() => { location.href = r.url; }, 600);
+  });
+}
+
+function saveOnly(){
+  const b = collect().party_b;
+  if (!b.name) { show('err','公司名不能为空。'); return; }
+  post('/api/save_supplier', b).then(r => {
+    show(r.ok ? 'ok' : 'err', r.ok ? '已存入档案。下次在「续签」里搜名字就能自动带出来。' : '保存失败');
+    if (r.ok) fetch('/api/archive',{method:'POST',body:'{}'}).then(x=>x.json()).then(j=>{
+      ARCH = (j.data && j.data.suppliers) || [];
+      $('archCount').textContent = ARCH.length;
+    });
+  });
+}
+
+// 默认今天
+$('s_date').value = new Date().toISOString().slice(0,10);
+syncPartyACode();
+initPayMode();
+updateTypeUI();
+renumberSteps();
+</script>
+<script src="/_alive.js"></script>
+</body>
+</html>

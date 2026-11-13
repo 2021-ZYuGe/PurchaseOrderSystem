@@ -1,0 +1,35 @@
+# 业务数据（绝不提交）
+data/
+web/data.js
+web/data.js.*
+web/图片/
+web/_生成合同/
+*.db
+*.db-wal
+*.db-shm
+
+# 业务资产
+运行环境/
+合同模板/
+projects/
+*.docx
+
+# 运行时产物
+__pycache__/
+*.py[cod]
+_增量批次_*/
+*.log
+*.csv
+*.zip
+*.bak
+*.bak_*
+
+# 系统文件
+*.lnk
+*.png
+*.ico
+desktop.ini
+.DS_Store
+Thumbs.db
+.workbuddy/
+.vscode/
