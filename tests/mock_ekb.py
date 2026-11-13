@@ -12,14 +12,7 @@
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
 from urllib.parse import parse_qs, urlparse
-
-ROOT = Path(__file__).resolve().parent.parent
-SAMPLE_DOCS = [
-    ROOT / 'tests' / 'golden' / 'simple' / 'contract.docx',
-    ROOT / 'tests' / 'golden' / 'dropship' / 'contract.docx',
-]
 
 TOKEN = 'accept-token-9f3a'
 BILLS = [
@@ -40,7 +33,9 @@ FILES = {
 class MockEkb:
     def __init__(self, token=TOKEN):
         self.token = token
-        self.docs = [p.read_bytes() for p in SAMPLE_DOCS]
+        # 只比较字节，不解析内容；合成数据即可，避免依赖业务样例
+        self.docs = [b'PK\x03\x04fake-docx-one' * 40,
+                     b'PK\x03\x04fake-docx-two' * 40]
         self.downloads = []
         self.calls = []
         self.httpd = ThreadingHTTPServer(('127.0.0.1', 0), self._handler())

@@ -14,8 +14,14 @@ web/_生成合同/
 projects/
 *.docx
 
-# 回归基线（测试用，允许提交；必须放在 *.docx 之后）
-!tests/golden/**/*.docx
+# 回归样例（含真实供应商/联系人/银行信息，只保留在本地）
+tests/golden/
+tests/fixtures/
+tests/smoke_test.py
+tests/diff_golden.py
+tests/make_golden.py
+tests/run_all.py
+回归自检.bat
 
 # 运行时产物
 dist/
