@@ -304,12 +304,12 @@ mark { background:#fff3bf; color:#8a5a00; padding:0 1px; border-radius:2px; }
 </div>
 
 <script>
-// 每次加载都换一个时间戳，彻底绕开浏览器缓存（Ctrl+F5 都不用按）
-document.write('<scr' + 'ipt src="data.js?t=' + Date.now() + '"></scr' + 'ipt>');
+// 数据不再打包成 data.js：页面启动后由 app.js 调 /api/bootstrap 拉取
+window.SUPPLIERS = window.SUPPLIERS || [];
 document.write('<scr' + 'ipt src="app.js?t=' + Date.now() + '"></scr' + 'ipt>');
 </script>
 <script>
-// 兜底：网页缓存缺失时可从 SQLite 一键重建；首次导入合同仍使用更新数据源工具
+// 数据为空或加载失败时的顶部提示条（由 app.js 调用）
 function __showGuide(html) {
   var mk = function () {
     var bar = document.createElement("div");
@@ -324,30 +324,7 @@ function __showGuide(html) {
   else document.addEventListener("DOMContentLoaded", mk);
 }
 function __guide() {
-  __showGuide("<b>网页暂无合同数据</b>　首次使用请运行「工具 / 更新数据源.py」；已导入可重建缓存 → " +
-    '<button onclick="__rebuild(this)" style="margin-left:12px;padding:8px 20px;font-size:15px;' +
-    'border:none;border-radius:6px;background:#fff;color:#c0392b;cursor:pointer;font-weight:700">从 SQLite 重建缓存</button>');
-}
-function __rebuild(btn) {
-  var bar = document.getElementById("__guideBar");
-  if (btn) { btn.disabled = true; btn.textContent = "正在从 SQLite 重建缓存…"; }
-  fetch("/__rebuild", { cache: "no-store" }).then(function (r) {
-    if (!r.ok) throw new Error("缓存重建失败（HTTP " + r.status + "）");
-    return r.text();
-  })
-    .then(function (t) {
-      if (bar) bar.innerHTML = "<b>完成：</b>" + (t || "").replace(/\n/g, "　") + "　页面即将刷新…";
-      setTimeout(function () { location.reload(true); }, 1500);
-    })
-    .catch(function (e) {
-      if (bar) bar.innerHTML = "<b>导入失败：</b>" + e + "　请双击文件夹里的「更新数据源.py」手动导入。";
-    });
-}
-if (typeof PRODUCTS === "undefined" || (typeof PRODUCTS !== "undefined" && PRODUCTS.length === 0)) {
-  window.PRODUCTS = window.PRODUCTS || [];
-  window.SUPPLIERS = window.SUPPLIERS || [];
-  window.__NO_DATA__ = true;
-  __guide();
+  __showGuide("<b>还没有合同数据</b>　请运行「工具 / 更新数据源.py」导入你自己的合同，导入完成后刷新本页。");
 }
 </script>
 <script src="/_alive.js"></script>

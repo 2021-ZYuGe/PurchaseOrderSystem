@@ -5,6 +5,25 @@ let state = {
   pay: null,               // full / p30 / p50
 };
 
+// 目录数据由 /api/bootstrap 提供（P2 起不再加载 data.js）
+let SUPPLIERS = window.SUPPLIERS || [];
+const META = { products: 0, suppliers: 0, with_image: 0, updated: "" };
+
+async function fetchJSON(url, opts) {
+  const resp = await fetch(url, Object.assign({ cache: "no-store" }, opts || {}));
+  const text = await resp.text();
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch (e) {
+    throw new Error("服务返回异常（HTTP " + resp.status + "）");
+  }
+  if (!data || data.ok !== true) {
+    throw new Error((data && data.error) || ("请求失败（HTTP " + resp.status + "）"));
+  }
+  return data.data;
+}
+
 const norm = s => (s||"").toLowerCase().replace(/\s+/g,"");
 const fmt = n => n.toLocaleString("zh-CN", {minimumFractionDigits:2, maximumFractionDigits:2});
 const fmt0 = n => Number(n).toLocaleString("zh-CN", {maximumFractionDigits:0});
@@ -12,13 +31,7 @@ const fmt0 = n => Number(n).toLocaleString("zh-CN", {maximumFractionDigits:0});
 // 新增产品的默认备注
 const DEFAULT_REMARK = "以上价格含13%专票+运费";
 
-// 产品匹配：主名称 + 别名 + 规格 都能命中
-function prodHit(p, q) {
-  if (norm(p.产品名称).includes(q)) return true;
-  if ((p.别名 || []).some(a => norm(a).includes(q))) return true;
-  if (q.length >= 2 && norm(p.规格).includes(q)) return true;
-  return false;
-}
+// 产品匹配规则在后端 search_products()（名称 / 别名 / 2 字以上规格）
 // 关键字高亮
 function hl(text, q) {
   if (!q || !text) return text || "";
@@ -548,24 +561,43 @@ function deleteTerm() {
     .catch(e => { msg.style.color = "#c62828"; msg.textContent = String(e.message || e); });
 }
 
-// ============ 产品搜索 ============
+// ============ 产品搜索（服务端按需查询，不再本地过滤全量） ============
 const prodInput = document.getElementById("prodInput");
 const prodResults = document.getElementById("prodResults");
+let prodSeq = 0;
+let prodTimer = null;
 
 prodInput.addEventListener("input", () => {
   const raw = prodInput.value.trim();
   const q = norm(raw);
+  clearTimeout(prodTimer);
   if (!q) { prodResults.classList.remove("show"); return; }
+  // 轻微防抖：避免每敲一个字都打一次接口
+  prodTimer = setTimeout(() => runProductSearch(raw, q), 120);
+});
+
+function showProdMessage(text) {
+  prodResults.innerHTML = '<div class="sr-item"><div class="d">' + text + '</div></div>';
+  prodResults.classList.add("show");
+}
+
+async function runProductSearch(raw, q) {
+  const seq = ++prodSeq;
+  const supplier = state.supplier ? state.supplier.id : "";
+  let items;
+  try {
+    const data = await fetchJSON(
+      "/api/products?q=" + encodeURIComponent(raw) +
+      "&limit=20&supplier=" + encodeURIComponent(supplier));
+    items = data.items || [];
+  } catch (e) {
+    if (seq === prodSeq) showProdMessage("搜索失败：" + e.message);
+    return;
+  }
+  // 输入已经变了就丢弃这次结果，避免慢响应盖住新结果
+  if (seq !== prodSeq || prodInput.value.trim() !== raw) return;
   const supKeys = new Set(state.supplier ? state.supplier["产品keys"] : []);
-  const matches = PRODUCTS.filter(p => prodHit(p, q));
-  // 供应商产品优先，其次有图的优先
-  matches.sort((a, b) =>
-    (supKeys.has(b.id)?1:0) - (supKeys.has(a.id)?1:0) ||
-    (b.图片?1:0) - (a.图片?1:0) ||
-    b.下单次数 - a.下单次数
-  );
-  const list = matches.slice(0, 20);
-  renderResults(prodResults, list, p => {
+  renderResults(prodResults, items, p => {
     const alias = (p.别名 || []).filter(a => norm(a).includes(q));
     const imgKey = p.图片 ? `${p.id}|${p.图片}` : p.id;
     return {
@@ -581,7 +613,7 @@ prodInput.addEventListener("input", () => {
     prodInput.value = "";
     prodResults.classList.remove("show");
   });
-});
+}
 
 function addProduct(p, key) {
   const k = key || p.id;
@@ -1166,24 +1198,51 @@ function exportMainContract() {
 }
 
 
-// ============ 初始化统计 ============
+// ============ 初始化：先拉目录，再渲染 ============
 function renderStat() {
   const fresh = (CONTRACT_STATUS.data && CONTRACT_STATUS.data.freshness) || {};
-  const updated = String(fresh.数据更新时间 || "").slice(0, 10);
+  const updated = String(META.updated || fresh.数据更新时间 || "").slice(0, 10);
   const extra = updated ? ` · 数据更新 ${updated}` : "";
   document.getElementById("statInfo").textContent =
-    `产品库 ${PRODUCTS.length} 项 · 供应商 ${SUPPLIERS.length} 家 · 图片 ${PRODUCTS.filter(p=>p.图片).length} 张${extra}`;
+    `产品库 ${META.products} 项 · 供应商 ${META.suppliers} 家 · 图片 ${META.with_image} 张${extra}`;
 }
-renderStat();
-renderItems();
-// 一键更新后页面会刷新，恢复刚才选中的供应商
-try {
-  const last = sessionStorage.getItem("lastSupplier");
-  if (last) {
+
+function restoreLastSupplier() {
+  // 一键更新后页面会刷新，恢复刚才选中的供应商
+  try {
+    const last = sessionStorage.getItem("lastSupplier");
+    if (!last) return;
     const saved = SUPPLIERS.find(x => x.供应商名称 === last);
     if (saved) selectSupplier(saved);
+  } catch (e) {}
+}
+
+async function bootstrap() {
+  const stat = document.getElementById("statInfo");
+  if (stat) stat.textContent = "正在加载产品库…";
+  try {
+    const data = await fetchJSON("/api/bootstrap");
+    const meta = data.meta || {};
+    META.products = meta.products || 0;
+    META.suppliers = meta.suppliers || 0;
+    META.with_image = meta.with_image || 0;
+    META.updated = meta.updated || "";
+    SUPPLIERS = data.suppliers || [];
+    renderStat();
+    restoreLastSupplier();
+    if (!META.products && window.__guide) window.__guide();
+  } catch (e) {
+    if (stat) stat.textContent = "产品库加载失败";
+    if (window.__showGuide) {
+      window.__showGuide("<b>读取不到产品库</b>　请确认系统服务正常，或运行「工具 / 更新数据源.py」导入合同。"
+        + '<button onclick="location.reload()" style="margin-left:12px;padding:8px 20px;font-size:15px;'
+        + 'border:none;border-radius:6px;background:#fff;color:#c0392b;cursor:pointer;font-weight:700">重新加载</button>');
+    }
   }
-} catch (e) {}
+}
+
+renderItems();
+bootstrap();
 loadContractStatus();
 loadExpiry();
 // 支持 ?expiry=1 直接打开预警面板（方便做桌面快捷方式）

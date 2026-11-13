@@ -77,8 +77,7 @@ except Exception:
 HERE = os.path.dirname(os.path.abspath(__file__))      # 工具/
 ROOT = os.path.dirname(HERE)                            # 项目根目录
 WEB = os.path.join(ROOT, "web")
-DATA = os.path.join(WEB, "data.js")
-IMG = os.path.join(WEB, "图片")
+IMG = os.path.join(ROOT, "data", "media")
 GEN = os.path.join(HERE, "_工具_生成数据库.py")
 REPORT = os.path.join(ROOT, "data", "未导入合同清单.csv")
 PY = os.environ.get("CAIGOU_PYTHON") or os.path.join(ROOT, "运行环境", "python.exe")
@@ -150,9 +149,20 @@ def common_root(paths):
     return root
 
 
-def load_data_js(path):
-    """严格读取隔离批次输出；损坏或缺少数组会直接报错。"""
-    return sqlite_store.read_data_js(path)
+def load_batch_catalog(path):
+    """读取隔离批次的目录 JSON；损坏或缺少数组会直接报错。"""
+    if not os.path.exists(path):
+        return [], []
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError) as e:
+        raise RuntimeError("批次目录损坏：%s（%s）" % (path, e))
+    products = data.get("products") if isinstance(data, dict) else None
+    suppliers = data.get("suppliers") if isinstance(data, dict) else None
+    if not isinstance(products, list) or not isinstance(suppliers, list):
+        raise RuntimeError("批次目录格式不对：%s" % path)
+    return products, suppliers
 
 
 def save_data_js(P, S, idx=None, expected_revision=None, expected_idx=None, contracts=None):
@@ -651,7 +661,7 @@ def main():
         pause()
         return
 
-    batch_data = os.path.join(tmp, "web", "data.js")
+    batch_data = os.path.join(tmp, "web", "_批次目录.json")
     if not os.path.exists(batch_data):
         print()
         print("[错误] 这批合同没能解析出产品。")
@@ -671,7 +681,7 @@ def main():
         pause()
         return
 
-    new_P, new_S = load_data_js(batch_data)
+    new_P, new_S = load_batch_catalog(batch_data)
     if not new_P:
         print("[错误] 本批没有有效产品，正式数据库和收录索引均未改动。")
         pause()
@@ -685,8 +695,6 @@ def main():
         print("合同台账：%d 份（含落款签署日期，用于刷新“最近签约”）" % len(batch_contracts))
 
     # ---------- 先在内存合并，并确保新图片全部就位 ----------
-    if os.path.exists(DATA):
-        shutil.copy2(DATA, DATA + ".bak")
     P, S, add_p, add_s = merge(old_P, old_S, new_P, new_S)
 
     src_img = os.path.join(tmp, "web", "图片")
@@ -766,7 +774,7 @@ def main():
                 print(line)
     except Exception:
         pass
-    print("    原数据库已备份到 data\\backups，网页缓存备份为 web\\data.js.bak")
+    print("    原数据库已备份到 data\\backups")
     print()
     print("  现在双击桌面【采购下单系统】就能看到新数据了。")
     print("=" * 58)

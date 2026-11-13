@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 """采购下单系统 SQLite 数据层。
 
-data/purchase.db 是唯一正式数据源；web/data.js 只是由数据库生成的网页缓存。
+data/purchase.db 是唯一正式数据源。
+P2 之后页面通过 /api/* 实时查库，不再生成 web/data.js 缓存。
 仅使用 Python 标准库，所有写操作均在事务中完成。
 """
-import hashlib
 import json
 import os
 import re
@@ -21,9 +21,8 @@ if __package__ in (None, ''):                 # 允许直接 python app/infra/st
 
 from app.config import BACKUP_DIR, DATA_DIR, DATA_JS, DB_PATH, ROOT_PATH as ROOT
 
-SCHEMA_VERSION = "2"
+SCHEMA_VERSION = "3"
 WRITE_LOCK = threading.RLock()
-CACHE_LOCK = threading.Lock()
 
 
 def normalize_path(path):
@@ -200,27 +199,11 @@ CREATE TABLE IF NOT EXISTS imported_contract_files (
     updated_at TEXT NOT NULL
 );
 
--- 遗留主库与现行 data.js 的 ID 体系不同，独立保存，避免错误混并。
-CREATE TABLE IF NOT EXISTS legacy_products (
-    legacy_id TEXT PRIMARY KEY,
-    name TEXT NOT NULL DEFAULT '',
-    spec TEXT NOT NULL DEFAULT '',
-    occurrence_count INTEGER NOT NULL DEFAULT 0,
-    suppliers_json TEXT NOT NULL DEFAULT '[]',
-    categories_json TEXT NOT NULL DEFAULT '[]',
-    prices_json TEXT NOT NULL DEFAULT '[]',
-    aliases_json TEXT NOT NULL DEFAULT '[]'
-);
-CREATE TABLE IF NOT EXISTS legacy_suppliers (
-    name TEXT PRIMARY KEY,
-    phone TEXT NOT NULL DEFAULT '',
-    product_count INTEGER NOT NULL DEFAULT 0
-);
-CREATE TABLE IF NOT EXISTS legacy_supplier_products (
-    supplier_name TEXT NOT NULL REFERENCES legacy_suppliers(name) ON DELETE CASCADE,
-    position INTEGER NOT NULL,
-    legacy_product_id TEXT NOT NULL,
-    PRIMARY KEY(supplier_name, position)
+-- 结构迁移记录：每个版本只执行一次，失败不会标记
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    version INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    applied_at TEXT NOT NULL
 );
 """
 
@@ -311,6 +294,57 @@ def init_schema(conn):
     row = conn.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()
     if row and row[0] != SCHEMA_VERSION:
         conn.execute("UPDATE schema_meta SET value=? WHERE key='schema_version'", (SCHEMA_VERSION,))
+
+
+def _table_exists(conn, name):
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone()
+    return row is not None
+
+
+def _m3_drop_legacy(conn):
+    """P2：删掉三张历史遗留表。
+
+    只在"旧库已完整导入"（legacy_import_completed 有值且产品非空）时执行，
+    执行前 ensure_database 会整库备份，误删也能恢复。
+    """
+    if not _meta(conn, "legacy_import_completed"):
+        return
+    if conn.execute("SELECT COUNT(*) FROM products").fetchone()[0] == 0:
+        return
+    for name in ("legacy_supplier_products", "legacy_products", "legacy_suppliers"):
+        if _table_exists(conn, name):
+            conn.execute("DROP TABLE " + name)
+
+
+# (版本号, 名称, 执行函数)；只追加，不修改已发布的条目
+MIGRATIONS = [
+    (3, "drop_legacy_tables", _m3_drop_legacy),
+]
+
+
+def _applied_migrations(conn):
+    if not _table_exists(conn, "schema_migrations"):
+        return set()
+    return {row[0] for row in conn.execute("SELECT version FROM schema_migrations")}
+
+
+def _pending_migrations(conn):
+    applied = _applied_migrations(conn)
+    return [m for m in MIGRATIONS if m[0] not in applied]
+
+
+def _apply_migrations(conn):
+    """逐个执行待办迁移；每个迁移与它的版本记录在同一事务里。"""
+    applied = _applied_migrations(conn)
+    for version, name, fn in MIGRATIONS:
+        if version in applied:
+            continue
+        fn(conn)
+        conn.execute(
+            "INSERT INTO schema_migrations(version, name, applied_at) VALUES(?, ?, ?)",
+            (version, name, time.strftime("%Y-%m-%d %H:%M:%S")),
+        )
 
 
 def _meta(conn, key, default=None):
@@ -533,7 +567,6 @@ def replace_catalog(products, suppliers, backup=True, imported_index=None,
             if imported_index is not None:
                 _write_imported_index(conn, imported_index)
     clear_pending_cache()
-    export_data_js()
 
 
 def _grouped_rows(conn, sql, key_name):
@@ -1054,41 +1087,6 @@ def scan_pending_contracts():
     return data
 
 
-def export_data_js():
-    DATA_JS.parent.mkdir(parents=True, exist_ok=True)
-    # 快照读取、修订核对和最终替换必须串行，避免旧快照覆盖新缓存。
-    with CACHE_LOCK, interprocess_lock(DATA_JS.with_name(DATA_JS.name + ".lock")):
-        for _export_attempt in range(5):
-            revision = catalog_revision()
-            products, suppliers = get_catalog()
-            if catalog_revision() != revision:
-                continue
-            body = "const PRODUCTS = " + json.dumps(products, ensure_ascii=False, separators=(",", ":")) + ";\n"
-            body += "const SUPPLIERS = " + json.dumps(suppliers, ensure_ascii=False, separators=(",", ":")) + ";\n"
-            stamp = hashlib.md5(body.encode("utf-8")).hexdigest()[:12]
-            text = "// 由 SQLite 自动生成，请勿手改；正式数据源为 data/purchase.db\n"
-            text += "const DATA_STAMP = '%s';\n" % stamp
-            text += body
-            temp = DATA_JS.with_name("%s.%s_%s.tmp" % (DATA_JS.name, os.getpid(), threading.get_ident()))
-            try:
-                temp.write_text(text, encoding="utf-8")
-                if catalog_revision() != revision:
-                    continue
-                for attempt in range(20):
-                    try:
-                        os.replace(str(temp), str(DATA_JS))
-                        break
-                    except PermissionError:
-                        if attempt == 19:
-                            raise
-                        time.sleep(0.05)
-                return len(products), len(suppliers), stamp
-            finally:
-                if temp.exists():
-                    temp.unlink()
-        raise RuntimeError("目录持续更新，网页缓存暂时无法生成，请稍后重试。")
-
-
 def product_count():
     if not DB_PATH.exists():
         return 0
@@ -1129,7 +1127,6 @@ def restore_database(backup_path):
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     with WRITE_LOCK, closing(sqlite3.connect(str(backup_path))) as source, closing(connect()) as dest:
         source.backup(dest)
-    export_data_js()
 
 
 def _read_imported_index(conn):
@@ -1434,6 +1431,9 @@ def _migrate_legacy(conn):
     imported = _read_json(DATA_DIR / "_已收录合同.json", {})
     _write_imported_index(conn, imported)
 
+    if not _table_exists(conn, "legacy_products"):
+        return                       # P2 之后新库不再建遗留表，直接跳过这段
+
     for record in _read_json(DATA_DIR / "产品主库.json", []):
         conn.execute(
             "INSERT OR REPLACE INTO legacy_products(legacy_id, name, spec, occurrence_count, "
@@ -1465,21 +1465,25 @@ def _migrate_legacy(conn):
 
 def ensure_database():
     """首次启动自动迁移；标记检查和迁移在同一立即写事务中。"""
+    existed = DB_PATH.exists()
     with WRITE_LOCK, interprocess_lock(DB_PATH.with_name(DB_PATH.name + ".init.lock")):
         with session() as conn:
             conn.execute("PRAGMA journal_mode = WAL")
             init_schema(conn)
+            pending = _pending_migrations(conn)
+        # 有结构迁移时先整库备份，再动表
+        if pending and existed:
+            backup_database("before_migration_v%d" % pending[0][0])
         with session(write=True) as conn:
             migrated = _meta(conn, "legacy_import_completed")
             if not migrated:
                 _migrate_legacy(conn)
                 _set_meta(conn, "legacy_import_completed", time.strftime("%Y-%m-%d %H:%M:%S"))
+            _apply_migrations(conn)
             history_files = (DATA_DIR / "供应商主合同信息.json", DATA_DIR / "合同提取记录.json")
             if all(path.exists() for path in history_files):
                 if _meta(conn, "history_source_signature") != _history_source_signature():
                     _replace_history_sources(conn)
-    # 每次启动都重建廉价缓存，确保手工改动 data.js 不会污染正式数据。
-    export_data_js()
     return str(DB_PATH)
 
 
@@ -1489,10 +1493,13 @@ def database_counts():
     names = (
         "products", "suppliers", "supplier_products", "supplier_profiles", "contracts",
         "contract_sign_dates", "supplier_main_contracts", "historical_order_items",
-        "imported_contract_files", "legacy_products", "legacy_suppliers",
+        "imported_contract_files",
     )
     with session() as conn:
-        return {name: conn.execute("SELECT COUNT(*) FROM " + name).fetchone()[0] for name in names}
+        available = {row[0] for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+        return {name: conn.execute("SELECT COUNT(*) FROM " + name).fetchone()[0]
+                for name in names if name in available}
 
 
 def verify_database():
@@ -1516,3 +1523,107 @@ def verify_database():
                 (integrity, len(foreign_key_errors), invalid_relations, duplicate_codes)
             )
         return {"integrity": integrity, "foreign_key_errors": 0, "invalid_relations": 0}
+
+
+# ---------------- 只读查询：前端按需取数（P2 起 data.js 退场） ----------------
+
+def _norm_text(value):
+    """与前端 norm() 一致：转小写、去掉所有空白"""
+    return re.sub(r"\s+", "", str(value or "")).lower()
+
+
+def _product_hit(product, q, raw_len):
+    """与前端 prodHit() 一致：名称 / 别名 / （2 字以上）规格"""
+    if q in _norm_text(product.get("产品名称")):
+        return True
+    if any(q in _norm_text(alias) for alias in (product.get("别名") or [])):
+        return True
+    if raw_len >= 2 and q in _norm_text(product.get("规格")):
+        return True
+    return False
+
+
+def catalog_meta():
+    """页面首屏需要的轻量统计，不包含任何明细"""
+    counts = database_counts()
+    with session() as conn:
+        with_image = conn.execute(
+            "SELECT COUNT(*) FROM products WHERE image <> ''").fetchone()[0]
+        updated = _meta(conn, "catalog_updated_at", "")
+    return {
+        "products": counts.get("products", 0),
+        "suppliers": counts.get("suppliers", 0),
+        "with_image": with_image,
+        "updated": updated,
+        "revision": catalog_revision(),
+        "stamp": database_stamp(),
+    }
+
+
+def list_suppliers_light():
+    """供应商下拉用的轻量列表：只有名字、电话、最近签约和产品 keys"""
+    if not DB_PATH.exists():
+        return []
+    stats = supplier_contract_stats()
+    with session() as conn:
+        rows = conn.execute(
+            "SELECT id, code, name, phone, main_contract_date, contract_count FROM suppliers "
+            "ORDER BY CAST(SUBSTR(code, 2) AS INTEGER), code").fetchall()
+        relations = {}
+        for row in conn.execute(
+                "SELECT sp.supplier_id, p.code FROM supplier_products sp "
+                "JOIN products p ON p.id = sp.product_id ORDER BY p.code"):
+            relations.setdefault(row["supplier_id"], []).append(row["code"])
+    result = []
+    for row in rows:
+        st = stats.get(row["name"]) or {}
+        latest = max(st.get("最近签约日期") or "", row["main_contract_date"] or "")
+        result.append({
+            "id": row["code"],
+            "供应商名称": row["name"],
+            "电话": row["phone"],
+            "最近签约日期": latest,
+            "主合同日期": latest,
+            "最近合同号": st.get("最近合同号", ""),
+            "合同记录数": int(st.get("份数") or 0),
+            "历史合同份数": int(row["contract_count"] or 0),
+            "产品keys": relations.get(row["id"], []),
+        })
+    return result
+
+
+def search_products(query, supplier_code=None, limit=20):
+    """产品搜索：命中规则与排序跟原来的前端本地搜索保持一致"""
+    raw = str(query or "").strip()
+    q = _norm_text(raw)
+    if not q:
+        return []
+    products, _ = get_catalog()
+    hits = [p for p in products if _product_hit(p, q, len(raw))]
+
+    sup_keys = set()
+    if supplier_code:
+        with session() as conn:
+            row = conn.execute(
+                "SELECT id FROM suppliers WHERE code = ?", (supplier_code,)).fetchone()
+            if row:
+                sup_keys = {r[0] for r in conn.execute(
+                    "SELECT p.code FROM supplier_products sp "
+                    "JOIN products p ON p.id = sp.product_id WHERE sp.supplier_id = ?",
+                    (row["id"],))}
+    # 该供应商的产品优先 → 有图的优先 → 下单次数多的优先
+    hits.sort(key=lambda p: (
+        0 if p["id"] in sup_keys else 1,
+        0 if p.get("图片") else 1,
+        -int(p.get("下单次数") or 0),
+    ))
+    return hits[:max(1, int(limit or 20))]
+
+
+def search_suppliers(query):
+    """供应商下拉的本地过滤；不传关键字时返回全部（轻量字段）"""
+    items = list_suppliers_light()
+    q = _norm_text(query)
+    if not q:
+        return items
+    return [s for s in items if q in _norm_text(s["供应商名称"])]

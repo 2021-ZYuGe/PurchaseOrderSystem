@@ -18,10 +18,14 @@ DATA_DIR = ROOT_PATH / 'data'
 TPL_DIR = ROOT_PATH / '合同模板'
 
 DB_PATH = DATA_DIR / 'purchase.db'
+# 仅用于读取旧版本留下的 data.js（一次性迁移），P2 起不再生成
 DATA_JS = WEB_DIR / 'data.js'
 BACKUP_DIR = DATA_DIR / 'backups'
 OUT_DIR = WEB_DIR / '_生成合同'
 LOG_PATH = DATA_DIR / '_运行日志.txt'
+# 产品图片属于用户数据，放 data 下；web/图片 只作为老版本的兼容来源
+MEDIA_DIR = DATA_DIR / 'media'
+LEGACY_MEDIA_DIR = WEB_DIR / '图片'
 
 # 一键更新时拉起的子进程脚本（P5 会改成服务内调用）
 MERGE_SCRIPT = TOOLS_DIR / '合并新合同.py'

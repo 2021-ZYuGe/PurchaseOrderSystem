@@ -9,8 +9,7 @@
 
 生成内容：
   data/purchase.db  SQLite 正式数据库（产品库 + 供应商库 + 主合同信息）
-  web/data.js      由 SQLite 生成的网页兼容缓存
-  web/图片/         所有产品图片
+  data/media/       所有产品图片
   Excel 版数据       （可选）
 """
 import os
@@ -416,11 +415,14 @@ def main():
         return
 
     here = Path(__file__).resolve().parent
-    # 正常运行时脚本在 工具/ 下，项目根目录是上一级；
-    # “合并新合同”会把脚本复制到独立的 工具/_增量批次_*/ 里运行，按当前目录输出。
-    if not (here / "web").exists():
+    # 两种运行方式：
+    #   1. 合并新合同的隔离批次：脚本被复制到 _增量批次_*/，图片先落批次目录，合并时再复制；
+    #   2. 正式运行（脚本在 工具/）：图片属于用户数据，直接写 data/media。
+    if (here / "web").exists():
+        img_dir = here / "web" / "图片"
+    else:
         here = here.parent
-    img_dir = here / "web" / "图片"
+        img_dir = here / "data" / "media"
     # 图片只新增或按内容哈希覆盖，绝不在解析前清空；失败/回滚时旧图片仍可用。
     img_dir.mkdir(parents=True, exist_ok=True)
 
@@ -686,14 +688,11 @@ def main():
         import sqlite_store
         sqlite_store.replace_catalog(P, S)
     else:
-        # “合并新合同”的隔离批次只生成临时 data.js，不接触正式数据库。
-        body = "const PRODUCTS = " + json.dumps(P, ensure_ascii=False, separators=(",", ":")) + ";\n"
-        body += "const SUPPLIERS = " + json.dumps(S, ensure_ascii=False, separators=(",", ":")) + ";\n"
-        stamp = hashlib.md5(body.encode("utf-8")).hexdigest()[:12]
-        js = "// 临时批次数据，请勿手改\n"
-        js += "const DATA_STAMP = '%s';\n" % stamp
-        js += body
-        (here / "web" / "data.js").write_text(js, encoding="utf-8")
+        # “合并新合同”的隔离批次只输出临时 JSON，不接触正式数据库。
+        (here / "web" / "_批次目录.json").write_text(
+            json.dumps({"products": P, "suppliers": S}, ensure_ascii=False),
+            encoding="utf-8",
+        )
         # 批次合同台账（含落款签署日期），供“合并新合同”写回 SQLite
         (here / "web" / "_批次合同.json").write_text(
             json.dumps(contract_records, ensure_ascii=False), encoding="utf-8"

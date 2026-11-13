@@ -219,11 +219,7 @@ def main():
         [(cid, start, end) for cid, (start, end) in updates.items()]
     )
     print("已更新 %d 条合同台账。" % changed)
-    try:
-        sqlite_store.export_data_js()
-        print("网页缓存 data.js 已同步。")
-    except Exception as e:
-        print("网页缓存重建失败（不影响数据库）：%s" % e)
+    print("页面刷新即可看到，无需重建缓存。")
     print()
     print("打开首页就能看到合同到期预警；没有期限的老合同可在预警面板里手工登记。")
     pause()

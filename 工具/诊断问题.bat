@@ -9,7 +9,7 @@ if exist "web\index.html" set "F1=存在"
 set "F2=缺失"
 if exist "web\app.js" set "F2=存在"
 set "F3=缺失"
-if exist "web\data.js" set "F3=存在"
+if exist "app\api\server.py" set "F3=存在"
 set "F4=缺失"
 if exist "工具\_工具_生成数据库.py" set "F4=存在"
 set "F5=缺失"
@@ -31,7 +31,7 @@ if exist "启动网页版.bat" set "F7=存在"
 >> "%R%" echo [2] 关键文件检查
 >> "%R%" echo   web\index.html          : %F1%
 >> "%R%" echo   web\app.js              : %F2%
->> "%R%" echo   web\data.js             : %F3%
+>> "%R%" echo   app\api\server.py       : %F3%
 >> "%R%" echo   启动网页版.bat          : %F7%
 >> "%R%" echo   工具\_工具_生成数据库.py : %F4%
 >> "%R%" echo   运行环境 文件夹         : %F6%

@@ -268,25 +268,20 @@ def remove_pycache():
 
 
 def rebuild_cache():
-    """从 data/purchase.db 重新生成 web/data.js"""
+    """P2 起页面实时查库，不再生成 web/data.js；这里改为校验数据库并返回统计。"""
     sys.path.insert(0, HERE)
     try:
         import sqlite_store
     finally:
         if sys.path and sys.path[0] == HERE:
             sys.path.pop(0)
-    data_js = os.path.join(ROOT, 'web', 'data.js')
-    for _ in range(3):
-        try:
-            if os.path.exists(data_js):
-                os.remove(data_js)
-            products, suppliers, stamp = sqlite_store.export_data_js()
-            return products, suppliers, stamp
-        except PermissionError:
-            time.sleep(0.8)
-        except Exception as e:
-            return None, None, str(e)
-    return None, None, '文件被占用'
+    try:
+        sqlite_store.verify_database()
+        counts = sqlite_store.database_counts()
+        return (counts.get('products', 0), counts.get('suppliers', 0),
+                sqlite_store.database_stamp())
+    except Exception as e:
+        return None, None, str(e)
 
 
 def drop_folder_icon(verbose=True):
@@ -389,21 +384,19 @@ def font_installed(filename):
     return any(os.path.isfile(os.path.join(b, filename)) for b in bases if b)
 
 
-def data_js_info():
-    p = os.path.join(ROOT, 'web', 'data.js')
-    if not os.path.isfile(p):
-        return None
-    stamp = ''
-    try:
-        with open(p, 'r', encoding='utf-8', errors='replace') as f:
-            for _ in range(6):
-                ln = f.readline()
-                if 'DATA_STAMP' in ln:
-                    stamp = ln.split("'")[1] if "'" in ln else ''
-                    break
-    except Exception:
-        pass
-    return {'size': os.path.getsize(p), 'mtime': mtime_str(p), 'stamp': stamp}
+def media_info():
+    """图片现状：P2 起在 data/media，老版本在 web/图片"""
+    for folder in (os.path.join(ROOT, 'data', 'media'), os.path.join(ROOT, 'web', '图片')):
+        if not os.path.isdir(folder):
+            continue
+        count = size = 0
+        for name in os.listdir(folder):
+            p = os.path.join(folder, name)
+            if os.path.isfile(p):
+                count += 1
+                size += os.path.getsize(p)
+        return {'dir': os.path.relpath(folder, ROOT), 'count': count, 'size': size}
+    return None
 
 
 SKIP_DIRS = {
@@ -693,7 +686,7 @@ def build_report():
     tpl_fp, tpl_missing = fingerprint(TPL_FILES)
     snap = tcp_snapshot()
     ports = running_ports(snap)
-    dj = data_js_info()
+    mi = media_info()
     db = os.path.join(ROOT, 'data', 'purchase.db')
     pycache = []
     for dirpath, dirnames, _ in os.walk(ROOT):
@@ -745,12 +738,11 @@ def build_report():
     else:
         add('    开机自启：未发现')
     add('')
-    add('[4] 缓存与数据')
-    if dj:
-        add('    web/data.js      %s  %s  数据指纹 %s' % (size_str(dj['size']),
-                                                        dj['mtime'], dj['stamp'] or '—'))
+    add('[4] 图片与数据')
+    if mi:
+        add('    %-16s %d 张  %.1f MB' % (mi['dir'], mi['count'], mi['size'] / 1024 / 1024))
     else:
-        add('    web/data.js      不存在（下次启动会自动生成）')
+        add('    图片目录         不存在（首次导入合同时自动创建）')
     if os.path.isfile(db):
         add('    data/purchase.db %s  %s' % (size_str(os.path.getsize(db)), mtime_str(db)))
     else:

@@ -88,10 +88,6 @@ def _sync_worker(items):
                 pass
 
     sqlite_store.clear_pending_cache()
-    try:
-        sqlite_store.export_data_js()
-    except Exception as e:
-        log("一键更新后重建缓存失败：%r" % (e,))
     message = "；".join(messages)[:300]
     _set_sync(state="done" if ok_all else "error",
               finished=time.strftime("%H:%M:%S"), message=message)

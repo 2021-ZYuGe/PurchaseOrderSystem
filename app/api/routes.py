@@ -15,13 +15,46 @@ from app.services import archive as archive_service
 from app.services import contracts as contract_service
 from app.services import sync as sync_service
 
-# GET 也允许的三个只读接口（其余接口只接受 POST）
-GET_PATHS = ('/api/contract_status', '/api/sync_status', '/api/contract_expiry')
+# GET 也允许的只读接口（其余接口只接受 POST）
+GET_PATHS = (
+    '/api/meta',
+    '/api/bootstrap',
+    '/api/products',
+    '/api/suppliers',
+    '/api/contract_status',
+    '/api/sync_status',
+    '/api/contract_expiry',
+)
 
 
 def dispatch(path, payload=None):
     p = payload if isinstance(payload, dict) else {}
     try:
+        if path == '/api/meta':
+            return {'ok': True, 'data': sqlite_store.catalog_meta()}
+
+        if path == '/api/bootstrap':
+            # 首屏一次拿齐：统计 + 轻量供应商列表；产品改按需搜索
+            return {'ok': True, 'data': {
+                'meta': sqlite_store.catalog_meta(),
+                'suppliers': sqlite_store.list_suppliers_light(),
+            }}
+
+        if path == '/api/products':
+            q = p.get('q') or p.get('query') or ''
+            try:
+                limit = int(p.get('limit') or 20)
+            except (TypeError, ValueError):
+                limit = 20
+            return {'ok': True, 'data': {
+                'items': sqlite_store.search_products(q, p.get('supplier') or None, limit),
+            }}
+
+        if path == '/api/suppliers':
+            return {'ok': True, 'data': {
+                'items': sqlite_store.search_suppliers(p.get('q') or ''),
+            }}
+
         if path == '/api/archive':
             return {'ok': True, 'data': archive_service.load_archive()}
 
@@ -48,14 +81,12 @@ def dispatch(path, payload=None):
                 p.get('到期日') or p.get('end') or '',
                 p.get('备注') or p.get('note') or '',
             )
-            sqlite_store.export_data_js()
             log('登记合同期限：%s 至 %s' % (res.get('供应商'), res.get('到期日')))
             return {'ok': True, 'data': res,
                     'overview': sqlite_store.contract_expiry_overview()}
 
         if path == '/api/delete_contract_term':
             res = sqlite_store.delete_contract_term(p.get('供应商') or p.get('supplier') or '')
-            sqlite_store.export_data_js()
             log('撤销合同期限登记：%s' % res.get('供应商'))
             return {'ok': True, 'data': res,
                     'overview': sqlite_store.contract_expiry_overview()}

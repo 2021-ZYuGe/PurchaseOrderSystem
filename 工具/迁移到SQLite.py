@@ -9,9 +9,8 @@ def main():
     verify_only = "--verify" in sys.argv
     if not verify_only:
         path = sqlite_store.ensure_database()
-        products, suppliers, stamp = sqlite_store.export_data_js()
         print("SQLite 数据库：%s" % path)
-        print("网页缓存已刷新：产品 %d 个 / 供应商 %d 家 / 指纹 %s" % (products, suppliers, stamp))
+        print("页面已改为实时查库，无需生成网页缓存。")
 
     result = sqlite_store.verify_database()
     counts = sqlite_store.database_counts()
@@ -29,12 +28,10 @@ def main():
         "supplier_main_contracts": "供应商主合同汇总",
         "historical_order_items": "历史合同产品行",
         "imported_contract_files": "已收录合同索引",
-        "legacy_products": "遗留产品主库",
-        "legacy_suppliers": "遗留供应商主库",
     }
     for key, label in labels.items():
         print("  %-24s %d" % (label, counts.get(key, 0)))
-    print("\n原 JSON 和 data.js 文件均未删除；data.js 现在只是 SQLite 生成的缓存。")
+    print("\n原 JSON 文件未删除，仅作为历史备份；正式数据以 SQLite 为准。")
 
 
 if __name__ == "__main__":

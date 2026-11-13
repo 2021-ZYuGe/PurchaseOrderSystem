@@ -24,7 +24,7 @@ import webbrowser
 
 import app.config as config
 from app.api import routes
-from app.infra import store as sqlite_store
+from app.infra import media, store as sqlite_store
 from app.infra.logging import log
 from app.services import archive as archive_service
 
@@ -300,6 +300,25 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 _alive.pop(cid, None)
             self.close_connection = True
 
+    def _serve_media(self, head):
+        """产品图片从 data/media 提供；老的 /图片/ 路径继续可用"""
+        name = urllib.parse.unquote(head.split('/', 2)[-1])
+        path = media.resolve(name)
+        if not path:
+            self.send_error(404)
+            return
+        try:
+            data = path.read_bytes()
+        except OSError:
+            self.send_error(404)
+            return
+        self.send_response(200)
+        self.send_header('Content-Type', media.content_type(path))
+        self.send_header('Content-Length', str(len(data)))
+        self.send_header('Cache-Control', 'public, max-age=86400')
+        self.end_headers()
+        self.wfile.write(data)
+
     def do_POST(self):
         path = self.path.split('?')[0]
         if path in ('/__bye', '/__bye/'):
@@ -338,11 +357,16 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
         global _alive_armed, _alive_empty_at
         head = self.path.split('?')[0]
+        if head.startswith('/media/') or head.startswith('/图片/'):
+            self._serve_media(head)
+            return
         if head in ('/__alive', '/__alive/'):
             self._sse_alive(self._query())
             return
         if head in routes.GET_PATHS:
-            body = json.dumps(routes.dispatch(head, {}), ensure_ascii=False).encode('utf-8')
+            query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+            params = {k: v[0] for k, v in query.items() if v}
+            body = json.dumps(routes.dispatch(head, params), ensure_ascii=False).encode('utf-8')
             self.send_response(200)
             self.send_header('Content-Type', 'application/json; charset=utf-8')
             self.send_header('Content-Length', str(len(body)))
@@ -366,12 +390,13 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return
         if head in ('/__rebuild', '/__rebuild/'):
             try:
-                products, suppliers, stamp = sqlite_store.export_data_js()
-                body = ('已从 SQLite 重新生成网页缓存：产品 %d 个，供应商 %d 家，指纹 %s'
-                        % (products, suppliers, stamp)).encode('utf-8')
+                meta = sqlite_store.catalog_meta()
+                body = ('数据库正常：产品 %d 个，供应商 %d 家，指纹 %s。'
+                        '页面已改为实时查询，不再需要重建缓存。'
+                        % (meta['products'], meta['suppliers'], meta['stamp'])).encode('utf-8')
                 self.send_response(200)
             except Exception as e:
-                body = ('缓存生成失败：%s' % e).encode('utf-8')
+                body = ('数据库检查失败：%s' % e).encode('utf-8')
                 self.send_response(500)
             self.send_header('Content-Type', 'text/plain; charset=utf-8')
             self.send_header('Content-Length', str(len(body)))
@@ -475,6 +500,13 @@ def main():
         log('SQLite 初始化失败: %r' % (e,))
         _msgbox('数据库初始化失败：%s' % e)
         return
+
+    try:
+        copied = media.ensure_migrated()
+        if copied:
+            log('图片已迁移到 data/media：%d 张' % copied)
+    except Exception as e:
+        log('图片迁移失败（不影响使用）: %r' % (e,))
 
     if not os.path.exists(os.path.join(WEB, 'index.html')):
         _msgbox('找不到网页文件 web\\index.html，文件夹不完整，请重新解压。')

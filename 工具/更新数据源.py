@@ -4,7 +4,6 @@
 用法：双击本文件 → 粘贴（或把文件夹拖进来）合同文件夹路径 → 回车
 """
 import os
-import shutil
 import subprocess
 import sys
 
@@ -13,8 +12,6 @@ import sqlite_store
 HERE = os.path.dirname(os.path.abspath(__file__))      # 工具/
 ROOT = os.path.dirname(HERE)                            # 项目根目录
 GEN = os.path.join(HERE, '_工具_生成数据库.py')
-WEB = os.path.join(ROOT, 'web')
-DATA = os.path.join(WEB, 'data.js')
 LOG = os.path.join(ROOT, 'data', '_更新数据日志.txt')
 
 
@@ -78,19 +75,16 @@ def main():
 
     # 生成前同时备份 SQLite 主库和旧网页缓存。
     sqlite_store.ensure_database()
-    backup = DATA + '.bak'
     db_backup = None
     before = count_products()
     if before:
         db_backup = sqlite_store.backup_database('before_full_update')
-        if os.path.exists(DATA):
-            shutil.copy2(DATA, backup)
         print('已备份原数据库（原来 %d 个产品）' % before)
 
     r = subprocess.run([sys.executable, GEN, path])
     log('生成目录 %s -> 返回码 %s' % (path, r.returncode))
 
-    after = count_products(DATA)
+    after = count_products()
 
     # 安全网：新数据明显比旧数据少，说明很可能指向了"部分合同"文件夹
     if before and after and after < before * 0.6:
@@ -107,8 +101,6 @@ def main():
         if ans != 'y':
             if db_backup:
                 sqlite_store.restore_database(db_backup)
-            elif os.path.exists(backup):
-                shutil.copy2(backup, DATA)
             log('已回滚到 SQLite 备份（保留 %d 个产品）' % before)
             print()
             print('已恢复原来的数据（%d 个产品）。' % before)
@@ -118,11 +110,9 @@ def main():
             return
 
     if r.returncode == 0 and after:
-        size = os.path.getsize(DATA) / 1024 / 1024
         print()
         print('============================================')
         print('  数据更新完成！%d 个产品 → %d 个产品' % (before or 0, after))
-        print('  data.js 大小：%.2f MB' % size)
         print()
         print('  双击桌面【采购下单系统】图标即可使用新数据。')
         print('============================================')

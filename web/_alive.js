@@ -8,6 +8,8 @@
     if (location.protocol !== 'http:' && location.protocol !== 'https:') return;
     var host = location.hostname;
     if (host !== '127.0.0.1' && host !== 'localhost') return;
+    // 自动化测试/截图时加 ?noalive=1，避免长连接让页面一直处于"加载中"
+    if (/[?&]noalive=1/.test(location.search)) return;
 
     var CID = 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
     var es = null;
