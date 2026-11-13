@@ -52,6 +52,7 @@ STAMP_FILES = [
     'app/infra/store.py',
     'web/index.html',
     'web/welcome.html',
+    'web/import.html',
     'web/js/app-core.js',
     'web/js/app-contract-status.js',
     'web/js/app-expiry.js',
@@ -60,6 +61,7 @@ STAMP_FILES = [
     'web/js/app-main.js',
     'web/js/system-panel.js',
     'web/js/welcome.js',
+    'web/js/import-page.js',
     'web/contract.html',
     'web/js/contract-page.js',
 ]

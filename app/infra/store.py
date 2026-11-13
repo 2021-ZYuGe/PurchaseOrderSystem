@@ -1696,3 +1696,26 @@ def schema_info():
         applied = [r[0] for r in conn.execute(
             "SELECT version FROM schema_migrations ORDER BY version")]
     return {"current": SCHEMA_VERSION, "applied": applied}
+
+
+def known_contract_numbers():
+    """已收录合同单号集合（从收录路径里提取），用于导入前判断重复。"""
+    if not DB_PATH.exists():
+        return set()
+    numbers = set()
+    with session() as conn:
+        try:
+            rows = conn.execute("SELECT path FROM imported_contract_files").fetchall()
+        except sqlite3.OperationalError:
+            rows = []
+        for row in rows:
+            no = contract_no_of(row["path"])
+            if no:
+                numbers.add(no.upper())
+        try:
+            for row in conn.execute("SELECT contract_no FROM contracts"):
+                if row[0]:
+                    numbers.add(str(row[0]).upper())
+        except sqlite3.OperationalError:
+            pass
+    return numbers

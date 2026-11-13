@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>导入合同 - 采购下单系统</title>
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:"Microsoft YaHei",sans-serif; background:#f0f2f5; color:#1f2329; font-size:14px; }
+[v-cloak] { display:none; }
+.header { background:#1a5fb4; color:#fff; padding:18px 28px; display:flex; justify-content:space-between;
+  align-items:center; flex-wrap:wrap; gap:10px; }
+.header h1 { font-size:19px; font-weight:600; }
+.header .sub { font-size:12px; opacity:.82; margin-top:3px; }
+.header a { color:#fff; text-decoration:none; border:1px solid rgba(255,255,255,.45); padding:7px 14px;
+  border-radius:7px; font-size:13px; background:rgba(255,255,255,.14); }
+.header a:hover { background:rgba(255,255,255,.28); }
+.wrap { max-width:980px; margin:22px auto; padding:0 20px; }
+.card { background:#fff; border-radius:12px; padding:20px 22px; margin-bottom:16px; box-shadow:0 1px 3px rgba(0,0,0,.06); }
+.card h2 { font-size:15px; font-weight:600; color:#1a5fb4; margin-bottom:10px; }
+.desc { font-size:13px; color:#5f6b7a; line-height:1.8; margin-bottom:12px; }
+.tabs { display:flex; gap:8px; margin-bottom:14px; }
+.tabs button { padding:8px 18px; border-radius:8px; border:1px solid #d5dbe3; background:#fff; cursor:pointer;
+  font-size:14px; font-family:inherit; }
+.tabs button.on { background:#1a5fb4; border-color:#1a5fb4; color:#fff; }
+textarea { width:100%; min-height:76px; padding:10px 12px; border:1px solid #d5dbe3; border-radius:8px;
+  font-size:13px; font-family:inherit; resize:vertical; line-height:1.7; }
+textarea:focus, input:focus, select:focus { outline:none; border-color:#1a5fb4; box-shadow:0 0 0 2px rgba(26,95,180,.12); }
+input[type=text], input[type=date], input[type=number], select { padding:9px 11px; border:1px solid #d5dbe3;
+  border-radius:8px; font-size:13px; font-family:inherit; background:#fff; }
+.row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+.row .grow { flex:1; min-width:220px; }
+.field { display:flex; flex-direction:column; gap:5px; }
+.field label { font-size:12px; color:#5f6b7a; }
+button { padding:9px 18px; border-radius:8px; border:1px solid #d5dbe3; background:#fff; cursor:pointer;
+  font-size:14px; font-family:inherit; white-space:nowrap; }
+button:hover { background:#f5f7fa; }
+button.primary { background:#1a5fb4; border-color:#1a5fb4; color:#fff; }
+button.primary:hover { background:#17509a; }
+button:disabled { opacity:.55; cursor:default; }
+.hint { font-size:12px; color:#8a94a3; line-height:1.9; margin-top:10px; }
+.msg { font-size:13px; margin-top:10px; line-height:1.8; }
+.msg.err { color:#c62828; }
+.msg.ok { color:#2e7d32; }
+.preview { margin-top:14px; border-top:1px solid #eef1f5; padding-top:14px; }
+.nums { display:flex; gap:22px; flex-wrap:wrap; font-size:13px; color:#3c4656; margin-bottom:10px; }
+.nums b { font-size:20px; color:#1a5fb4; margin-right:4px; }
+.nums .dup b { color:#b26a00; }
+table { width:100%; border-collapse:collapse; font-size:12px; }
+th, td { text-align:left; padding:7px 8px; border-bottom:1px solid #f0f2f5; vertical-align:top; }
+th { color:#5f6b7a; font-weight:500; background:#fafbfc; }
+.tag { display:inline-block; padding:1px 8px; border-radius:20px; font-size:11px; }
+.tag.new { background:#e8f5e9; color:#1b5e20; }
+.tag.dup { background:#fff8e1; color:#8a5a00; }
+.progress { height:9px; background:#eef1f5; border-radius:5px; overflow:hidden; margin:14px 0 8px; }
+.progress .bar { height:100%; background:#1a5fb4; transition:width .3s; }
+.progress .bar.indeterminate { width:35%; animation:slide 1.2s infinite linear; }
+@keyframes slide { from { margin-left:-35%; } to { margin-left:100%; } }
+.result { background:#f1f8e9; border:1px solid #c5e1a5; border-radius:10px; padding:14px 16px; margin-top:14px; }
+.result b { color:#2e7d32; }
+.history td { color:#3c4656; }
+.footer { text-align:center; font-size:12px; color:#8a94a3; padding:6px 0 26px; line-height:1.9; }
+</style>
+</head>
+<body>
+<div id="importApp" v-cloak>
+  <div class="header">
+    <div>
+      <h1>导入合同</h1>
+      <div class="sub">从易快报批量下载合同附件，或直接导入本地文件夹；先预览再入库</div>
+    </div>
+    <a href="/index.html">← 返回首页</a>
+  </div>
+
+  <div class="wrap">
+    <div class="card">
+      <div class="tabs">
+        <button :class="{on: tab === 'ekb'}" @click="tab = 'ekb'">易快报链接</button>
+        <button :class="{on: tab === 'folder'}" @click="tab = 'folder'">本地文件夹</button>
+      </div>
+
+      <template v-if="tab === 'ekb'">
+        <div class="desc">
+          企业微信里打开易快报 → 底部「我的单据」→ 右上角 … → 复制链接，粘贴到这里。<br>
+          链接里有登录凭证，只在内存中使用，不会保存到磁盘。
+        </div>
+        <textarea v-model="url" placeholder="粘贴易快报链接（包含 accessToken 与 ekbCorpId）" :disabled="running"></textarea>
+
+        <div class="row" style="margin-top:12px">
+          <div class="field"><label>单据模板</label>
+            <input type="text" v-model="opts.template" style="width:180px" :disabled="running"></div>
+          <div class="field"><label>附件关键字</label>
+            <input type="text" v-model="opts.keyword" style="width:130px" placeholder="留空=全部" :disabled="running"></div>
+          <div class="field"><label>只处理此日期之后</label>
+            <input type="date" v-model="opts.since" :disabled="running"></div>
+          <div class="field"><label>单据范围</label>
+            <select v-model="opts.scope" :disabled="running">
+              <option value="all">全部</option>
+              <option value="active">在途</option>
+              <option value="done">已完成</option>
+              <option value="paid">已支付</option>
+            </select></div>
+          <div class="field"><label>最多处理</label>
+            <input type="number" min="0" v-model.number="opts.limit" style="width:96px" :disabled="running"></div>
+        </div>
+
+        <div class="row" style="margin-top:14px">
+          <button @click="previewEkb" :disabled="running || checking || !url.trim()">
+            {{ checking ? '正在检查…' : '检查链接 / 预览' }}
+          </button>
+          <button class="primary" @click="startEkb" :disabled="running || !preview || (preview.new === 0 && !opts.include_duplicates)">
+            {{ running ? '导入中…' : '开始导入' }}
+          </button>
+          <span class="hint" v-if="!preview">先预览，确认新增与重复数量再导入。</span>
+        </div>
+
+        <div class="msg err" v-if="error">{{ error }}</div>
+
+        <div class="preview" v-if="preview">
+          <div class="nums">
+            <span>已连接 <b>{{ preview.who || '易快报' }}</b></span>
+            <span>匹配单据 <b>{{ preview.matching }}</b></span>
+            <span>新增 <b>{{ preview.new }}</b></span>
+            <span class="dup">重复 <b>{{ preview.duplicates }}</b></span>
+          </div>
+          <div class="desc" v-if="preview.new === 0">
+            这批单据都已经导入过了。要重新下载，可以勾选下面的「包含重复单据」。
+          </div>
+          <table v-if="preview.samples.length">
+            <thead><tr><th style="width:110px">单号</th><th>标题</th><th style="width:90px">提交日期</th><th style="width:70px">状态</th></tr></thead>
+            <tbody>
+              <tr v-for="s in preview.samples" :key="s.code + s.flow_id">
+                <td>{{ s.code }}</td>
+                <td>{{ s.title }} <span class="tag" :class="s.is_new ? 'new' : 'dup'">{{ s.is_new ? '新增' : '已有' }}</span></td>
+                <td>{{ s.submit }}</td>
+                <td>{{ s.state }}</td>
+              </tr>
+            </tbody>
+          </table>
+          <label class="hint" style="display:block;margin-top:10px">
+            <input type="checkbox" v-model="opts.include_duplicates"> 包含重复单据（正常不用勾）
+          </label>
+          <div class="hint">每张单据约 1 秒（读取附件地址），几百张需要十几分钟；期间可以离开页面，回来会接着显示进度。</div>
+        </div>
+      </template>
+
+      <template v-else>
+        <div class="desc">
+          已经手动把合同下载到本地时用这个入口。只做增量导入：已收录的合同会自动跳过。
+        </div>
+        <div class="row">
+          <input type="text" class="grow" v-model="folder" placeholder="粘贴合同文件夹路径，或点「浏览…」" :disabled="running">
+          <button @click="pickFolder" :disabled="running || picking">{{ picking ? '选择中…' : '浏览…' }}</button>
+          <button class="primary" @click="startFolder" :disabled="running || !folder.trim()">开始导入</button>
+        </div>
+        <div class="msg err" v-if="error">{{ error }}</div>
+        <div class="hint">注意：这里不会清空现有数据，只把新合同追加进来。</div>
+      </template>
+    </div>
+
+    <div class="card" v-if="showProgress">
+      <h2>导入进度</h2>
+      <div class="progress">
+        <div class="bar" :class="{indeterminate: running && !status.total}"
+             :style="{width: running && status.total ? percent + '%' : ''}"></div>
+      </div>
+      <div class="msg">
+        <b>{{ phaseLabel }}</b>
+        <span v-if="status.total"> · {{ status.done }}/{{ status.total }}</span>
+        <span v-if="status.message"> — {{ status.message }}</span>
+      </div>
+      <div class="msg err" v-if="status.state === 'error'">{{ status.error }}</div>
+      <div class="result" v-if="status.state === 'done' && status.result">
+        <div><b>导入完成</b> · 批次 {{ status.result.id }}</div>
+        <div class="hint" style="margin-top:6px">
+          单据 {{ status.result.stats.bills_new || 0 }} 张新增
+          · 附件 {{ status.result.stats.attachments || 0 }} 个
+          · 下载 {{ status.result.stats.downloaded || 0 }} 个
+          · 跳过 {{ status.result.stats.skipped || 0 }} 个
+          · 失败 {{ status.result.stats.failed || 0 }} 个
+        </div>
+        <div style="margin-top:10px">
+          <a href="/index.html" style="color:#1a5fb4">去首页看看 →</a>
+          <button style="margin-left:12px" @click="reset">再导一批</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>最近批次</h2>
+      <div class="desc" v-if="!history.length">还没有导入记录。</div>
+      <table class="history" v-else>
+        <thead><tr><th style="width:150px">时间</th><th style="width:80px">来源</th><th>结果</th><th style="width:80px">状态</th></tr></thead>
+        <tbody>
+          <tr v-for="h in history" :key="h.id">
+            <td>{{ h.created }}</td>
+            <td>{{ h.source === 'ekuaibao' ? '易快报' : '文件夹' }}</td>
+            <td>{{ h.message || h.stats.bills_new || '' }}</td>
+            <td>{{ h.status === 'done' ? '完成' : (h.status === 'error' ? '失败' : h.status) }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="footer">导入过程不会改动已收录的合同；失败的原因会写进批次目录的 batch.json 与下载记录.csv。</div>
+  </div>
+</div>
+
+<script src="vendor/vue.global.prod.js"></script>
+<script src="js/import-page.js"></script>
+</body>
+</html>

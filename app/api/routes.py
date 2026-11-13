@@ -14,6 +14,7 @@ from app.infra.logging import log
 from app.services import archive as archive_service
 from app.services import backup as backup_service
 from app.services import contracts as contract_service
+from app.services import imports as import_service
 from app.services import setup as setup_service
 from app.services import sync as sync_service
 from app.services import system as system_service
@@ -25,6 +26,8 @@ GET_PATHS = (
     '/api/products',
     '/api/suppliers',
     '/api/system/info',
+    '/api/import/status',
+    '/api/import/history',
     '/api/setup/status',
     '/api/backups',
     '/api/contract_status',
@@ -78,6 +81,21 @@ def dispatch(path, payload=None):
 
         if path == '/api/backup/now':
             return {'ok': True, 'data': backup_service.manual()}
+
+        if path == '/api/import/status':
+            return {'ok': True, 'data': import_service.status()}
+
+        if path == '/api/import/history':
+            return {'ok': True, 'data': {'items': import_service.history()}}
+
+        if path == '/api/import/ekb/preview':
+            return import_service.preview_ekb(p)
+
+        if path == '/api/import/ekb/start':
+            return import_service.start_ekb(p)
+
+        if path == '/api/import/folder':
+            return import_service.start_folder(p)
 
         if path == '/api/archive':
             return {'ok': True, 'data': archive_service.load_archive()}
