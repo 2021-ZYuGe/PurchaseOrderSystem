@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>采购下单系统</title>
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="shortcut icon" type="image/x-icon" href="/favicon.ico">
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:"Microsoft YaHei",sans-serif; background:#f0f2f5; color:#1f2329; font-size:14px; }
+.header { background:#1a5fb4; color:#fff; padding:14px 28px; display:flex; justify-content:space-between; align-items:center; }
+.header h1 { font-size:18px; font-weight:600; }
+.header .sub { font-size:12px; opacity:.8; margin-top:2px; }
+.wrap { max-width:1280px; margin:20px auto; padding:0 20px; }
+.card { background:#fff; border-radius:10px; padding:20px 24px; margin-bottom:16px; box-shadow:0 1px 3px rgba(0,0,0,.06); }
+.card h2 { font-size:15px; font-weight:600; margin-bottom:14px; color:#1a5fb4; display:flex; align-items:center; gap:8px; }
+.card h2 .step { background:#1a5fb4; color:#fff; width:22px; height:22px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; font-size:12px; }
+.row { display:flex; gap:16px; flex-wrap:wrap; }
+.field { flex:1; min-width:220px; }
+.field label { display:block; font-size:12px; color:#5f6b7a; margin-bottom:5px; }
+.field input, .field select, .field textarea { width:100%; padding:9px 11px; border:1px solid #d5dbe3; border-radius:7px; font-size:14px; font-family:inherit; }
+.field input:focus, .field select:focus { outline:none; border-color:#1a5fb4; box-shadow:0 0 0 2px rgba(26,95,180,.12); }
+.search-box { position:relative; }
+.search-results { position:absolute; top:100%; left:0; right:0; background:#fff; border:1px solid #d5dbe3; border-radius:7px; max-height:320px; overflow-y:auto; z-index:50; display:none; box-shadow:0 6px 18px rgba(0,0,0,.12); }
+.search-results.show { display:block; }
+.sr-item { padding:9px 12px; cursor:pointer; border-bottom:1px solid #f0f2f5; }
+.sr-item:hover { background:#eef4fc; }
+.sr-item .t { font-weight:500; }
+.sr-item .d { font-size:12px; color:#8a94a3; margin-top:2px; }
+.sr-item .thumb { width:34px; height:34px; object-fit:cover; border-radius:5px; vertical-align:middle; margin-right:8px; float:left; }
+.selected-products { margin-top:14px; }
+.sp-table { width:100%; border-collapse:collapse; }
+.sp-table th { background:#f5f7fa; padding:9px 10px; font-size:12px; color:#5f6b7a; text-align:left; font-weight:500; border-bottom:1px solid #e5e9ef; }
+.sp-table td { padding:9px 10px; border-bottom:1px solid #f0f2f5; vertical-align:middle; }
+.sp-table img { width:52px; height:52px; object-fit:cover; border-radius:6px; border:1px solid #e5e9ef; cursor:pointer; }
+.sp-table img.noimg { display:flex; align-items:center; justify-content:center; color:#c0c8d2; font-size:10px; background:#f5f7fa; }
+.sp-table input[type=number] { width:100px; padding:6px 8px; border:1px solid #d5dbe3; border-radius:5px; text-align:right; }
+.sp-table .price-input { width:100px; }
+.sp-table .amt { font-weight:600; color:#d84315; text-align:right; white-space:nowrap; }
+.sp-table .remark-input { width:100%; padding:6px 8px; border:1px solid #d5dbe3; border-radius:5px; font-family:inherit; font-size:12px; }
+.sp-table .remark-input::placeholder { color:#c0c8d2; }
+.btn-del { color:#e53935; cursor:pointer; border:none; background:none; font-size:16px; padding:4px 8px; }
+.btn-del:hover { background:#fcebeb; border-radius:5px; }
+.pay-options { display:flex; gap:12px; flex-wrap:wrap; }
+.pay-opt { flex:1; min-width:240px; border:2px solid #d5dbe3; border-radius:9px; padding:14px 16px; cursor:pointer; transition:all .15s; }
+.pay-opt:hover { border-color:#7fabdc; }
+.pay-opt.active { border-color:#1a5fb4; background:#eef4fc; }
+.pay-opt.disabled { opacity:.45; cursor:not-allowed; }
+.pay-opt .pt { font-weight:600; font-size:14px; margin-bottom:4px; }
+.pay-opt .pd { font-size:12px; color:#8a94a3; line-height:1.5; }
+.pay-threshold { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:14px; font-size:13px; color:#5f6b7a; }
+.pay-threshold input { width:150px; padding:8px 10px; border:1px solid #d5dbe3; border-radius:7px; font-size:14px; font-family:inherit; text-align:right; }
+.pay-threshold input:focus { outline:none; border-color:#1a5fb4; box-shadow:0 0 0 2px rgba(26,95,180,.12); }
+.pay-threshold .unit { color:#8a94a3; font-size:12px; }
+.total-bar { background:#fff7ed; border:1px solid #ffd8a8; border-radius:9px; padding:14px 20px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; }
+.total-bar .tl { font-size:13px; color:#8a5a00; }
+.total-bar .tv { font-size:24px; font-weight:700; color:#d84315; }
+.total-bar .tv small { font-size:13px; color:#8a5a00; font-weight:400; }
+.actions { display:flex; gap:12px; justify-content:flex-end; margin-top:18px; }
+.btn { padding:10px 26px; border-radius:8px; border:none; font-size:14px; cursor:pointer; font-family:inherit; font-weight:500; }
+.btn-primary { background:#1a5fb4; color:#fff; }
+.btn-primary:hover { background:#154a8f; }
+.btn-primary:disabled { background:#a8c3e3; cursor:not-allowed; }
+.btn-ghost { background:#fff; color:#1a5fb4; border:1px solid #1a5fb4; }
+.hint { font-size:12px; color:#8a94a3; margin-top:6px; line-height:1.6; }
+.pay-note { background:#eef4fc; border-radius:7px; padding:10px 14px; font-size:13px; color:#1a5fb4; margin-top:12px; display:none; }
+.pay-note.show { display:block; }
+.modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,.45); z-index:100; align-items:center; justify-content:center; }
+.modal.show { display:flex; }
+.modal img { max-width:80vw; max-height:80vh; border-radius:10px; background:#fff; padding:10px; }
+.tag { display:inline-block; background:#eef4fc; color:#1a5fb4; font-size:11px; padding:1px 7px; border-radius:9px; margin-left:6px; }
+.stat { font-size:12px; color:#8a94a3; }
+.contract-box { margin-top:14px; padding:12px 16px; border-radius:8px; font-size:13px; line-height:1.6; }
+.contract-box .cb-title { font-weight:600; font-size:14px; }
+.contract-box .cb-sub { font-weight:400; font-size:12px; opacity:.72; margin-left:6px; }
+.contract-box .cb-line { margin-top:3px; }
+.contract-box .cb-meta { margin-top:9px; padding-top:8px; border-top:1px dashed rgba(0,0,0,.13); font-size:12px; line-height:1.7; color:#5f6b7a; }
+.contract-box .cb-meta .warn { color:#b26a00; font-weight:600; }
+.contract-box .cb-meta .ok { color:#1b5e20; }
+.contract-box .cb-meta .muted { color:#8a94a3; }
+.contract-box .cb-meta .file { color:#8a94a3; word-break:break-all; }
+.contract-box .cb-actions { margin-top:8px; display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.contract-box .cb-btn { background:#1a5fb4; color:#fff; border:none; border-radius:6px; padding:6px 14px; font-size:12px; font-family:inherit; cursor:pointer; }
+.contract-box .cb-btn:hover { background:#154a8f; }
+.contract-box .cb-btn:disabled { background:#a8c3e3; cursor:not-allowed; }
+.contract-box .cb-msg { font-size:12px; color:#5f6b7a; }
+mark { background:#fff3bf; color:#8a5a00; padding:0 1px; border-radius:2px; }
+
+/* ===== 合同到期预警 ===== */
+.btn-expiry { position:relative; text-decoration:none; background:rgba(255,255,255,.16); border:1px solid rgba(255,255,255,.45);
+  color:#fff; padding:6px 14px; border-radius:6px; font-size:13px; white-space:nowrap; }
+.btn-expiry:hover { background:rgba(255,255,255,.3); }
+.btn-expiry .badge { position:absolute; top:-7px; right:-7px; min-width:17px; height:17px; padding:0 5px; border-radius:9px;
+  background:#e53935; color:#fff; font-size:11px; line-height:17px; text-align:center; font-weight:600; }
+.expiry-bar { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;
+  background:#fff8e1; border:1px solid #ffe0a3; color:#8a5a00; border-radius:10px; padding:12px 18px; margin-bottom:16px;
+  box-shadow:0 1px 3px rgba(0,0,0,.05); }
+.expiry-bar.urgent { background:#fdecea; border-color:#f3c2bd; color:#b71c1c; }
+.expiry-bar .eb-main { display:flex; align-items:center; gap:10px; font-size:13px; flex-wrap:wrap; line-height:1.7; }
+.expiry-bar .eb-main b { font-size:15px; }
+.expiry-bar .eb-btn { background:#1a5fb4; color:#fff; border:none; border-radius:6px; padding:7px 18px;
+  font-size:13px; cursor:pointer; font-family:inherit; white-space:nowrap; }
+.expiry-bar .eb-btn:hover { background:#154a8f; }
+.cb-tag { display:inline-block; font-size:12px; padding:1px 8px; border-radius:9px; margin-left:6px; font-weight:600; }
+.cb-link { color:#1a5fb4; text-decoration:underline; cursor:pointer; }
+.exp-modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,.45); z-index:200; align-items:center;
+  justify-content:center; padding:20px; }
+.exp-modal.show { display:flex; }
+.exp-panel { background:#fff; border-radius:12px; width:min(1180px,97vw); max-height:90vh; display:flex;
+  flex-direction:column; overflow:hidden; box-shadow:0 18px 48px rgba(0,0,0,.24); }
+.exp-head { padding:18px 22px 12px; border-bottom:1px solid #eef1f5; display:flex; justify-content:space-between; align-items:flex-start; gap:12px; }
+.exp-title { font-size:16px; font-weight:600; color:#1a5fb4; }
+.exp-sub { font-size:12px; color:#8a94a3; margin-top:4px; line-height:1.6; }
+.exp-close { border:none; background:none; font-size:24px; line-height:1; color:#8a94a3; cursor:pointer; padding:0 4px; }
+.exp-close:hover { color:#1f2329; }
+.exp-tools { padding:12px 22px 0; display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+.exp-tools input { flex:1; min-width:220px; padding:8px 12px; border:1px solid #d5dbe3; border-radius:7px;
+  font-size:13px; font-family:inherit; }
+.exp-tools input:focus { outline:none; border-color:#1a5fb4; box-shadow:0 0 0 2px rgba(26,95,180,.12); }
+.exp-tools .exp-hint { font-size:12px; color:#8a94a3; }
+.exp-tabs { padding:12px 22px 10px; display:flex; gap:8px; flex-wrap:wrap; border-bottom:1px solid #eef1f5; }
+.exp-tab { border:1px solid #d5dbe3; background:#fff; color:#5f6b7a; border-radius:16px; padding:5px 13px;
+  font-size:12px; cursor:pointer; font-family:inherit; }
+.exp-tab:hover { border-color:#9dbfe4; }
+.exp-tab.active { background:#1a5fb4; border-color:#1a5fb4; color:#fff; }
+.exp-tab .n { opacity:.85; margin-left:3px; }
+.exp-body { overflow:auto; padding:6px 22px 22px; flex:1; }
+.exp-table { width:100%; border-collapse:collapse; font-size:13px; table-layout:fixed; }
+.exp-table th { position:sticky; top:0; background:#f5f7fa; color:#5f6b7a; font-weight:500; font-size:12px;
+  text-align:left; padding:9px 10px; border-bottom:1px solid #e5e9ef; z-index:1; }
+.exp-table td { padding:9px 10px; border-bottom:1px solid #f2f4f7; vertical-align:middle; }
+.exp-table tr:hover td { background:#f8fbff; }
+.exp-table .sup { font-weight:500; min-width:170px; }
+.exp-table .sup small { display:block; font-weight:400; color:#8a94a3; font-size:11px; margin-top:2px; }
+.exp-table .cb-tag { white-space:nowrap; }
+.exp-table .date { white-space:nowrap; font-variant-numeric:tabular-nums; }
+.exp-table .days { white-space:nowrap; font-weight:600; }
+.exp-table .no { color:#8a94a3; font-size:12px; white-space:nowrap; }
+.exp-table .ops { white-space:nowrap; text-align:right; }
+.exp-table .op { border:none; background:none; color:#1a5fb4; cursor:pointer; font-size:12px; padding:3px 6px;
+  font-family:inherit; border-radius:5px; }
+.exp-table .op:hover { background:#eef4fc; }
+.exp-table .op.plain { color:#8a94a3; }
+.exp-empty { padding:36px 0; text-align:center; color:#8a94a3; font-size:13px; }
+.term-card { background:#fff; border-radius:12px; width:min(430px,94vw); padding:22px 24px; box-shadow:0 18px 48px rgba(0,0,0,.24); }
+.term-title { font-size:15px; font-weight:600; color:#1a5fb4; margin-bottom:4px; }
+.term-sub { font-size:12px; color:#8a94a3; margin-bottom:16px; line-height:1.6; }
+.term-card label { display:block; font-size:12px; color:#5f6b7a; margin-bottom:12px; }
+.term-card input { width:100%; margin-top:5px; padding:9px 11px; border:1px solid #d5dbe3; border-radius:7px;
+  font-size:14px; font-family:inherit; }
+.term-card input:focus { outline:none; border-color:#1a5fb4; box-shadow:0 0 0 2px rgba(26,95,180,.12); }
+.term-actions { display:flex; justify-content:flex-end; gap:10px; margin-top:6px; }
+.term-actions button { padding:8px 18px; border-radius:7px; font-size:13px; cursor:pointer; font-family:inherit;
+  border:1px solid #d5dbe3; background:#fff; color:#5f6b7a; }
+.term-actions .primary { background:#1a5fb4; border-color:#1a5fb4; color:#fff; }
+.term-actions .primary:hover { background:#154a8f; }
+.term-msg { font-size:12px; color:#c62828; margin-top:10px; min-height:16px; }
+.img-switch { position:absolute; right:2px; bottom:2px; width:20px; height:20px; border-radius:50%; background:rgba(26,95,180,.88); color:#fff;
+  font-size:12px; line-height:20px; text-align:center; cursor:pointer; user-select:none; }
+.img-switch:hover { background:#1a5fb4; }
+</style>
+</head>
+<body>
+<div class="header">
+  <div><h1>采购下单系统</h1><div class="sub">选供应商 → 选产品 → 填单价数量 → 自动算总价 → 导出合同</div></div>
+  <div style="display:flex;align-items:center;gap:16px">
+    <div class="stat" id="instBadge" style="color:#dcebff;font-size:12px;white-space:nowrap;opacity:.85"></div>
+    <a class="stat" href="/contract.html" style="text-decoration:none;background:rgba(255,255,255,.16);
+       border:1px solid rgba(255,255,255,.45);color:#fff;padding:6px 14px;border-radius:6px;font-size:13px"
+       onmouseover="this.style.background='rgba(255,255,255,.3)'" onmouseout="this.style.background='rgba(255,255,255,.16)'"
+       >＋ 主合同（新签 / 续签）</a>
+    <a class="btn-expiry" href="javascript:;" onclick="openExpiry()">合同到期
+      <span class="badge" id="expiryBadge" style="display:none">0</span></a>
+    <div class="stat" id="statInfo"></div>
+  </div>
+</div>
+<div class="wrap">
+
+  <!-- 合同到期提醒：有紧急项时才出现 -->
+  <div class="expiry-bar" id="expiryBar" style="display:none"></div>
+
+  <!-- 第1步 供应商 -->
+  <div class="card">
+    <h2><span class="step">1</span>选择供应商</h2>
+    <div class="row">
+      <div class="field">
+        <label>输入供应商名称（支持模糊搜索）</label>
+        <div class="search-box">
+          <input id="supInput" placeholder="如：示例科技有限公司" autocomplete="off">
+          <div class="search-results" id="supResults"></div>
+        </div>
+      </div>
+      <div class="field" id="supInfo" style="display:none">
+        <label>已选供应商</label>
+        <div style="padding:9px 11px; background:#eef4fc; border-radius:7px;">
+          <b id="supName"></b> <span class="tag" id="supProdCount"></span>
+          <div class="hint" id="supTel"></div>
+        </div>
+      </div>
+    </div>
+    <div class="contract-box" id="contractBox" style="display:none"></div>
+  </div>
+
+  <!-- 第2步 产品 -->
+  <div class="card" id="cardProduct" style="display:none">
+    <h2><span class="step">2</span>选择产品 <span class="stat" style="margin-left:8px" id="prodCount"></span></h2>
+    <div class="field">
+      <div class="search-box">
+        <input id="prodInput" placeholder="输入产品名称搜索，可添加多个产品" autocomplete="off">
+        <div class="search-results" id="prodResults"></div>
+      </div>
+      <div class="hint">优先显示该供应商的产品；产品<strong>别名</strong>和<strong>规格</strong>关键词也能搜到，如"U盘""帆布袋"。可添加多个产品。</div>
+    </div>
+    <div class="selected-products">
+      <table class="sp-table" id="prodTable">
+        <thead><tr>
+          <th style="width:52px">图片</th><th>产品名称</th><th style="width:170px">规格</th>
+          <th style="width:110px">单价(元)</th><th style="width:90px">数量</th>
+          <th style="width:110px">总价(元)</th><th style="width:170px">备注</th><th style="width:44px"></th>
+        </tr></thead>
+        <tbody id="prodTbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- 第3步 付款方式 -->
+  <div class="card" id="cardPay" style="display:none">
+    <h2><span class="step">3</span>付款方式</h2>
+    <div class="pay-threshold">
+      <label for="payThreshold">预付款起订金额</label>
+      <input id="payThreshold" type="number" min="0" step="1000" value="70000">
+      <span class="unit">元：订单总额达到此金额，才可选择 30% / 50% 预付款</span>
+    </div>
+    <div class="pay-options" id="payOptions">
+      <div class="pay-opt" data-pay="full">
+        <div class="pt">全额付款</div>
+        <div class="pd">合同签订后按约定期限支付100%货款</div>
+      </div>
+      <div class="pay-opt" data-pay="p30">
+        <div class="pt">30% 预付款 + 70% 尾款</div>
+        <div class="pd">签订后付30%预付款，收货/生产完成后付70%尾款</div>
+      </div>
+      <div class="pay-opt" data-pay="p50">
+        <div class="pt">50% 预付款 + 50% 尾款</div>
+        <div class="pd">签订后付50%预付款，收货/生产完成后付50%尾款</div>
+      </div>
+    </div>
+    <div class="pay-note" id="payNote"></div>
+  </div>
+
+  <!-- 汇总 -->
+  <div class="card" id="cardTotal" style="display:none">
+    <div class="total-bar">
+      <div class="tl">本次订购总金额（含税）</div>
+      <div class="tv"><small>¥ </small><span id="grandTotal">0.00</span></div>
+    </div>
+    <div class="hint" id="payDetail" style="margin-top:8px"></div>
+    <div class="actions">
+      <button class="btn btn-ghost" onclick="resetAll()">清空重来</button>
+      <button class="btn btn-ghost" onclick="exportMainContract()">导出主体合同（需签时用）</button>
+      <button class="btn btn-primary" id="btnExport" onclick="exportDoc()">导出订购清单（日常下单）</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="imgModal" onclick="this.classList.remove('show')"><img id="modalImg"></div>
+
+<!-- 合同到期预警面板 -->
+<div class="exp-modal" id="expiryModal" onclick="if(event.target===this)closeExpiry()">
+  <div class="exp-panel">
+    <div class="exp-head">
+      <div>
+        <div class="exp-title">合同到期预警</div>
+        <div class="exp-sub" id="expirySub">按合同正文「本合同期限…自…起至…止」里的到期日计算，剩余天数每天自动更新。
+          早期合同没写期限的会归到「未登记」，可手工补录；已过期的多是很久以前签的框架合同，核实后登记新日期或走续签即可。</div>
+      </div>
+      <button class="exp-close" onclick="closeExpiry()" title="关闭">×</button>
+    </div>
+    <div class="exp-tools">
+      <input id="expirySearch" placeholder="搜索供应商名称…" autocomplete="off" oninput="renderExpiryRows()">
+      <span class="exp-hint">早期合同没写期限的，点「登记」手工补上；登记后续签会自动顶掉旧日期。</span>
+    </div>
+    <div class="exp-tabs" id="expiryTabs"></div>
+    <div class="exp-body" id="expiryBody"></div>
+  </div>
+</div>
+
+<!-- 手工登记合同期限 -->
+<div class="exp-modal" id="termModal" onclick="if(event.target===this)closeTermEditor()">
+  <div class="term-card">
+    <div class="term-title">登记合同期限</div>
+    <div class="term-sub" id="termSub"></div>
+    <label>起始日期（可不填）<input type="date" id="termStart"></label>
+    <label>到期日期<input type="date" id="termEnd"></label>
+    <label>备注（可不填）<input id="termNote" placeholder="如：续签待用印 / 按 1 年推算"></label>
+    <div class="term-actions">
+      <button type="button" id="termDelete" onclick="deleteTerm()" style="margin-right:auto;color:#c62828">撤销登记</button>
+      <button type="button" onclick="closeTermEditor()">取消</button>
+      <button type="button" class="primary" id="termSave" onclick="submitTerm()">保存</button>
+    </div>
+    <div class="term-msg" id="termMsg"></div>
+  </div>
+</div>
+
+<script>
+// 每次加载都换一个时间戳，彻底绕开浏览器缓存（Ctrl+F5 都不用按）
+document.write('<scr' + 'ipt src="data.js?t=' + Date.now() + '"></scr' + 'ipt>');
+document.write('<scr' + 'ipt src="app.js?t=' + Date.now() + '"></scr' + 'ipt>');
+</script>
+<script>
+// 兜底：网页缓存缺失时可从 SQLite 一键重建；首次导入合同仍使用更新数据源工具
+function __showGuide(html) {
+  var mk = function () {
+    var bar = document.createElement("div");
+    bar.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:99999;" +
+      "background:#c0392b;color:#fff;padding:14px 20px;font-size:16px;line-height:1.9;" +
+      "box-shadow:0 2px 8px rgba(0,0,0,.3);text-align:center";
+    bar.id = "__guideBar";
+    bar.innerHTML = html;
+    document.body.appendChild(bar);
+  };
+  if (document.body) mk();
+  else document.addEventListener("DOMContentLoaded", mk);
+}
+function __guide() {
+  __showGuide("<b>网页暂无合同数据</b>　首次使用请运行「工具 / 更新数据源.py」；已导入可重建缓存 → " +
+    '<button onclick="__rebuild(this)" style="margin-left:12px;padding:8px 20px;font-size:15px;' +
+    'border:none;border-radius:6px;background:#fff;color:#c0392b;cursor:pointer;font-weight:700">从 SQLite 重建缓存</button>');
+}
+function __rebuild(btn) {
+  var bar = document.getElementById("__guideBar");
+  if (btn) { btn.disabled = true; btn.textContent = "正在从 SQLite 重建缓存…"; }
+  fetch("/__rebuild", { cache: "no-store" }).then(function (r) {
+    if (!r.ok) throw new Error("缓存重建失败（HTTP " + r.status + "）");
+    return r.text();
+  })
+    .then(function (t) {
+      if (bar) bar.innerHTML = "<b>完成：</b>" + (t || "").replace(/\n/g, "　") + "　页面即将刷新…";
+      setTimeout(function () { location.reload(true); }, 1500);
+    })
+    .catch(function (e) {
+      if (bar) bar.innerHTML = "<b>导入失败：</b>" + e + "　请双击文件夹里的「更新数据源.py」手动导入。";
+    });
+}
+if (typeof PRODUCTS === "undefined" || (typeof PRODUCTS !== "undefined" && PRODUCTS.length === 0)) {
+  window.PRODUCTS = window.PRODUCTS || [];
+  window.SUPPLIERS = window.SUPPLIERS || [];
+  window.__NO_DATA__ = true;
+  __guide();
+}
+</script>
+<script src="/_alive.js"></script>
+<script>
+// 本机实例标识：右上角显示"现在打开的是哪一份系统"（版本 + 目录）
+// 旧版本的页面没有这段，看不到这个标记 —— 这也是区分新旧的标志。
+(function () {
+  try {
+    fetch('/__ping', { cache: 'no-store' }).then(function (r) { return r.text(); }).then(function (t) {
+      var p = String(t || '').split('|');
+      if (p[0] !== 'pong') return;
+      var el = document.getElementById('instBadge');
+      if (!el) return;
+      var dir = String(p[1] || '').replace(/[\\/]+$/, '').split(/[\\/]/).pop();
+      var ver = p[2] ? ('新版 ' + p[2]) : '旧版';
+      el.textContent = '● ' + ver + (dir ? ' · ' + dir : '');
+      el.title = '当前网页由本机这份系统提供\n版本：' + (p[2] || '旧版本（没有版本标记）') +
+                 '\n目录：' + (p[1] || '未上报') + '\n端口：' + (location.port || '80');
+      el.style.color = p[2] ? '#dcebff' : '#ffd2d2';
+    }).catch(function () {});
+  } catch (e) {}
+})();
+</script>
+</body>
+</html>
