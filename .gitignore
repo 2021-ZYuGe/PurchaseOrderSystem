@@ -14,6 +14,9 @@ web/_生成合同/
 projects/
 *.docx
 
+# 回归基线（测试用，允许提交；必须放在 *.docx 之后）
+!tests/golden/**/*.docx
+
 # 运行时产物
 __pycache__/
 *.py[cod]

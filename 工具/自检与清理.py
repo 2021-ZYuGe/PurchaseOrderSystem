@@ -35,10 +35,16 @@ DETACHED_PROCESS = 0x00000008
 CREATE_NEW_PROCESS_GROUP = 0x00000200
 
 # 决定“合同长什么样”和“程序逻辑”的文件，任何一个不同，指纹就不同
+# P1 起真实代码在 app/ 分层目录；工具/ 下只保留兼容入口，不再参与指纹
 KEY_FILES = [
-    '工具/生成主合同.py',
-    '工具/打开系统_静默.py',
-    '工具/sqlite_store.py',
+    'app/config.py',
+    'app/domain/contract_doc.py',
+    'app/infra/store.py',
+    'app/api/server.py',
+    'app/api/routes.py',
+    'app/services/contracts.py',
+    'app/services/archive.py',
+    'app/services/sync.py',
     'web/index.html',
     'web/app.js',
     'web/contract.html',
