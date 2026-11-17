@@ -84,7 +84,7 @@ INVALID = r'[\\/:*?"<>|\r\n\t]'
 
 # ---------------- 基础工具 ----------------
 def ensure_tpl(kind):
-    """找到模板：优先用项目内 合同模板/ 下的文件，缺了才按 TPL_SOURCE 兜底"""
+    """找到模板：优先用项目内 templates/ 下的文件，缺了才按 TPL_SOURCE 兜底"""
     if kind not in TPL_FILES:
         raise ValueError('未知合同类型：%s' % kind)
     local = os.path.join(TPL_DIR, TPL_FILES[kind])
@@ -97,10 +97,10 @@ def ensure_tpl(kind):
             shutil.copy2(src, local)
             return local
     # 报错要能直接照着修：说清缺哪个文件、应该放在哪。
-    # 另一台电脑上装系统时最常见的就是「合同模板」文件夹没一起拷过去。
+    # 另一台电脑上装系统时最常见的就是 templates 文件夹没一起拷过去。
     raise FileNotFoundError(
         '找不到「%s」合同模板，缺少文件 %s。'
-        '请把整个「合同模板」文件夹复制到程序目录下（应放位置：%s）'
+        '请把整个 templates 文件夹复制到程序目录下（应放位置：%s）'
         % (TPL_NAMES.get(kind, kind), TPL_FILES[kind], TPL_DIR)
     )
 
@@ -745,7 +745,7 @@ def make_contract(p):
     # 主动清点还剩哪些空没有填（例如订购清单金额本就应该每次下单时再填）
     todo = collect_todo(doc)
     return {'ok': True, 'name': fname, 'path': path,
-            'url': urllib.parse.quote('/_生成合同/' + fname, safe='/'),
+            'url': urllib.parse.quote('/output/' + fname, safe='/'),
             'todo': todo}
 
 
@@ -929,7 +929,7 @@ def make_info_sheet(p):
     fname = '供应商信息收集表_%s_%s.docx' % (safe_name(b.get('name') or '新供应商', 16), stamp)
     path = os.path.join(OUT_DIR, fname)
     doc.save(path)
-    url = urllib.parse.quote('/_生成合同/' + fname, safe='/')
+    url = urllib.parse.quote('/output/' + fname, safe='/')
     return {'ok': True, 'name': fname, 'path': path, 'url': url}
 
 

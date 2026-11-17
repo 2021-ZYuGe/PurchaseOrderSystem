@@ -1,0 +1,23 @@
+[project]
+name = "purchase-order-system"
+version = "2026.11.17"
+description = "部门内部采购合同下单工具（本机运行）"
+requires-python = ">=3.10"
+dependencies = [
+    "blinker==1.9.0",
+    "click==8.5.1",
+    "flask==3.1.3",
+    "itsdangerous==2.2.0",
+    "jinja2==3.1.6",
+    "markupsafe==3.0.4",
+    "werkzeug==3.1.9",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+exclude = ["runtime", "web", "web-next", "data", "dist", "node_modules"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]

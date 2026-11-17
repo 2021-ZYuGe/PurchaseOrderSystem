@@ -9,8 +9,6 @@ import os
 import re
 import sqlite3
 import shutil
-import subprocess
-import sys
 import tempfile
 import threading
 import zipfile
@@ -18,7 +16,6 @@ import time
 from ctypes import wintypes
 from pathlib import Path
 
-import app.config as config
 from app.infra import media, store
 from app.infra.logging import log
 
@@ -78,36 +75,32 @@ def import_contracts(folder):
 
 
 def _import_worker(folder):
-    env = dict(os.environ)
-    env['PYTHONIOENCODING'] = 'utf-8'
-    env['PYTHONUTF8'] = '1'
-    cmd = [sys.executable, str(config.TOOLS_DIR / '_工具_生成数据库.py'), str(folder)]
     tail = []
+
+    def on_line(line):
+        line = (line or '').strip()
+        if not line:
+            return
+        tail.append(line)
+        del tail[:-8]
+        match = re.search(r'已处理\s*(\d+)\s*/\s*(\d+)', line)
+        if match:
+            _set(done=int(match.group(1)), total=int(match.group(2)),
+                 message='正在解析合同（%s/%s）…' % (match.group(1), match.group(2)))
+        elif '解析完成' in line or '提取产品' in line:
+            _set(message=line)
+
     try:
-        proc = subprocess.Popen(
-            cmd, cwd=config.ROOT, env=env, stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-        for raw in iter(proc.stdout.readline, b''):
-            line = raw.decode('utf-8', 'replace').strip()
-            if not line:
-                continue
-            tail.append(line)
-            tail = tail[-8:]
-            m = re.search(r'已处理\s*(\d+)\s*/\s*(\d+)', line)
-            if m:
-                _set(done=int(m.group(1)), total=int(m.group(2)),
-                     message='正在解析合同（%s/%s）…' % (m.group(1), m.group(2)))
-            elif '解析完成' in line or '提取产品' in line:
-                _set(message=line)
-        code = proc.wait()
-        if code == 0 and store.product_count() > 0:
+        from app.domain import parser as contract_parser
+        contract_parser.run(folder, on_line=on_line)
+        if store.product_count() > 0:
             media.ensure_migrated()
             _set(state='done', finished=time.strftime('%H:%M:%S'),
                  message='导入完成：产品 %d 个，供应商 %d 家'
                          % (store.product_count(), len(store.list_suppliers_light())))
             log('首次导入完成：%s' % folder)
         else:
-            reason = tail[-1] if tail else ('解析器返回码 %s' % code)
+            reason = tail[-1] if tail else '解析器没有产出产品'
             _set(state='error', error=reason, finished=time.strftime('%H:%M:%S'),
                  message='导入失败')
             log('首次导入失败（%s）：%s' % (folder, reason))

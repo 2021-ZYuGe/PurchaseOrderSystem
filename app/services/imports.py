@@ -5,19 +5,16 @@
   * ekuaibao  粘贴易快报链接，自动下载合同附件
   * folder    直接指定本地文件夹（增量导入）
 
-真正的解析/合并仍复用 工具/合并新合同.py，避免两套入库逻辑。
+真正的解析/合并复用 app/domain/parser.py 与 merge.py，进程内执行。
 """
 import csv
 import json
-import os
-import subprocess
-import sys
+import re
 import threading
 import time
 import traceback
 from pathlib import Path
 
-import app.config as config
 from app.infra import store
 from app.infra.logging import log
 from app.integrations import ekuaibao
@@ -393,32 +390,27 @@ def _import_and_finish(folder, meta, files, root):
 
 
 def _merge(files, root, folder):
+    """进程内执行增量合并，进度按行回写状态"""
     listfile = folder / '_待导入清单.txt'
     listfile.write_text('\n'.join(files), encoding='utf-8')
-    env = dict(os.environ)
-    env['PYTHONIOENCODING'] = 'utf-8'
-    env['PYTHONUTF8'] = '1'
-    # 让合并脚本里的解析器复用当前解释器（无便携运行环境时也能跑）
-    env['CAIGOU_PYTHON'] = sys.executable
-    command = [sys.executable, str(config.MERGE_SCRIPT),
-               '--files', str(listfile), '--yes', str(root)]
+    lines = []
+
+    def on_line(line):
+        lines.append(line)
+        match = re.search(r'已处理\s*(\d+)\s*/\s*(\d+)', line)
+        if match:
+            _set(phase='importing', done=int(match.group(1)),
+                 total=int(match.group(2)), message=line.strip())
+        elif '合并完成' in line:
+            _set(phase='importing', message='正在写入数据库…')
+
     try:
-        result = subprocess.run(
-            command, cwd=config.ROOT, env=env, stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=3600)
+        from app.domain import merge
+        merge.run_files(str(listfile), str(root), on_line=on_line)
     except Exception as e:
-        return False, '调用合并脚本失败：%s' % e
-    return result.returncode == 0, _decode_output(result.stdout)
-
-
-def _decode_output(raw):
-    """合并脚本在管道里可能输出 GBK，也可能输出 UTF-8；两种都试。"""
-    for encoding in ('utf-8', 'gbk'):
-        try:
-            return raw.decode(encoding)
-        except UnicodeDecodeError:
-            continue
-    return raw.decode('utf-8', 'replace')
+        log('合并失败：%r' % (e,))
+        return False, '合并失败：%s\n%s' % (e, '\n'.join(lines[-5:]))
+    return True, '\n'.join(lines)
 
 
 def _write_csv(folder, rows):

@@ -3,7 +3,7 @@
 部门内部使用的采购合同下单工具：从历史合同 `.docx` 中提取产品、供应商、历史价格和图片，
 选好供应商与产品后，自动生成《产品订购清单》或主合同。
 
-单人本地运行，所有数据保存在本机 `data/` 目录，不上传任何服务器。
+每位同事在自己的 Windows 电脑上独立运行，数据保存在本机 `data/`，不上传任何服务器。
 
 ## 功能
 
@@ -21,57 +21,61 @@ Windows，Python 3.10+（开发使用 3.13）。仓库不包含便携运行时�
 
 ```bat
 python -m pip install python-docx
-python app/main.py
+python -m app
 ```
 
 浏览器打开 `http://127.0.0.1:8899/`。没有数据时首次启动会自动进入 `/welcome.html` 向导，
 选中合同文件夹即可导入。
 
-也可以双击 `启动网页版.bat`：优先使用同目录的 `运行环境\pythonw.exe`，没有则使用 PATH 里的 `pythonw`。
+日常使用双击根目录的「采购下单系统」快捷方式：它调用 `runtime\pythonw.exe -m app`，不弹控制台；
+关闭最后一个网页后服务自动退出。快捷方式丢失时运行 `maintenance.bat` 重建，或直接双击 `start.bat`。
 
 ## 目录结构
 
 ```
-app/
-  api/          HTTP 服务与路由
-  services/     业务编排（合同、档案、同步、备份、首启、批次导入）
-  domain/       合同模板填充与金额换算
-  infra/        SQLite、图片、日志
-  integrations/ 易快报客户端
-web/            页面与前端脚本（Vue 仅用于新页面）
-工具/           命令行工具与兼容入口
-data/           用户数据（不提交：数据库、图片、备份）
-tests/          回归测试
-version.json    版本与数据结构版本
+app/               后端
+  api/             HTTP 生命周期、路由与处理器
+  services/        业务编排（合同、档案、同步、备份、首启、批次导入）
+  domain/          合同模板填充、解析、合并、金额换算
+  infra/           SQLite、图片、日志
+  integrations/    易快报客户端
+web/               页面与前端资源
+templates/         合同模板
+tools/             维护脚本（构建、比对、停止、快捷方式）
+runtime/           便携 Python（不提交）
+data/              用户数据（不提交：数据库、图片、备份、日志）
+docs/              使用与维护说明
+openspec/          变更规格与任务
+version.json       版本与数据结构版本
 ```
 
 ## 数据与隐私
 
 以下内容不会进入仓库，也不会进入发布包：
 
-- `data/`（数据库、图片、备份、日志）
-- `运行环境/`（便携 Python）
-- `合同模板/`、`web/图片/`
-- `tests/golden/`、`tests/fixtures/`（含真实供应商、联系人、价格、银行账号，只保留在本地）
-- `dist/`、`__pycache__/`、各种缓存
+- `data/`（数据库、图片、备份、日志、归档）
+- `runtime/`（便携 Python）
+- `templates/`、`web/dist/` 之外的构建缓存
+- `dist/`、`__pycache__/`、`node_modules/`
 
 公开仓库中不含任何合同、供应商、联系方式、价格或产品图片。
 
-## 测试
+## 维护与回归
+
+改合同填充、解析或合并逻辑前后，各生成一份同样的合同，用比对工具逐段对比：
 
 ```bat
-python -m unittest discover -s tests -v
+runtime\python.exe tools\docx_diff.py old.docx new.docx
 ```
 
-包含：金额大写等纯逻辑、SQLite 搜索等价性、备份保留策略、发布包清单校验、
-易快报客户端（含本地模拟服务、真实 urllib 请求）。
+内容一致返回 0，有差异逐行输出并返回 1。也可以运行 `maintenance.bat`，在菜单里选“比对两份合同”。
 
-黄金合同对比（`tests/diff_golden.py`）与完整接口冒烟依赖本地业务样例，未包含在本仓库。
+`maintenance.bat` 还提供：停止系统、清理缓存、查看日志、重建快捷方式。
 
 ## 发布包
 
 ```bat
-python 工具/构建发布包.py
+python tools\构建发布包.py
 ```
 
 输出 `dist/采购下单系统_v<版本>.zip`。构建脚本会排除 `data/`、图片、历史合同和缓存，

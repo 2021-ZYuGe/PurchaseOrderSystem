@@ -364,46 +364,6 @@ def _set_meta(conn, key, value):
     )
 
 
-def _read_json(path, default):
-    path = Path(path)
-    if not path.exists():
-        return default
-    try:
-        with path.open("r", encoding="utf-8") as f:
-            return json.load(f)
-    except (OSError, ValueError, TypeError) as exc:
-        raise RuntimeError("旧数据文件无法读取，已停止迁移以避免不完整导入：%s（%s）" % (path, exc))
-
-
-def read_data_js(path=None):
-    """读取旧缓存；文件存在但损坏时必须报错，不能把损坏当成空数据。"""
-    source = Path(path or DATA_JS)
-    if not source.exists():
-        return [], []
-    try:
-        text = source.read_text(encoding="utf-8")
-    except OSError as exc:
-        raise RuntimeError("无法读取 %s：%s" % (source, exc))
-
-    def grab(name):
-        marker = "const " + name
-        start = text.find(marker)
-        if start < 0:
-            raise RuntimeError("%s 中缺少 %s" % (source, marker))
-        start = text.find("[", start + len(marker))
-        if start < 0:
-            raise RuntimeError("%s 中 %s 不是数组" % (source, marker))
-        try:
-            value, _ = json.JSONDecoder().raw_decode(text[start:])
-        except ValueError as exc:
-            raise RuntimeError("%s 中 %s 数据损坏：%s" % (source, marker, exc))
-        if not isinstance(value, list):
-            raise RuntimeError("%s 中 %s 不是数组" % (source, marker))
-        return value
-
-    return grab("PRODUCTS"), grab("SUPPLIERS")
-
-
 def _as_list(value):
     return list(value) if isinstance(value, (list, tuple)) else []
 
@@ -1354,146 +1314,6 @@ def get_historical_order_items():
         } for r in rows]
 
 
-def _history_source_signature():
-    parts = []
-    for name in ("供应商主合同信息.json", "合同提取记录.json"):
-        path = DATA_DIR / name
-        try:
-            stat = path.stat()
-            parts.append("%s:%d:%d" % (name, stat.st_size, stat.st_mtime_ns))
-        except OSError:
-            parts.append(name + ":missing")
-    return "|".join(parts)
-
-
-def _replace_history_sources(conn):
-    """历史 JSON 若由原有外部工具更新，则同步到 SQLite。
-
-    合同台账采用增量更新：已存在的按「文件名 + 合同号」更新，不删除
-    增量导入进来、但旧 JSON 里没有的合同，避免换电脑/外部工具刷新时丢数据。
-    """
-    main_info = _read_json(DATA_DIR / "供应商主合同信息.json", {})
-    history = _read_json(DATA_DIR / "合同提取记录.json", [])
-    conn.execute("DELETE FROM supplier_main_contracts")
-    conn.execute("DELETE FROM historical_order_items")
-    for index, record in enumerate(main_info.get("合同记录") or []):
-        contract_no = str(record.get("合同号") or "")
-        filename = str(record.get("文件名") or "")
-        supplier = str(record.get("供应商") or "")
-        main_date = record.get("主合同日期")
-        has_sheet = 1 if record.get("有订购清单页") else 0
-        sheet_start = record.get("订购清单起始段")
-        row = conn.execute(
-            "SELECT id FROM contracts WHERE filename=? AND IFNULL(contract_no, '')=? "
-            "ORDER BY id LIMIT 1",
-            (filename, contract_no),
-        ).fetchone()
-        if row is None:
-            cur = conn.execute(
-                "INSERT INTO contracts(source_order, contract_no, filename, supplier_name, "
-                "main_contract_date, has_order_sheet, order_sheet_start_paragraph) "
-                "VALUES(?, ?, ?, ?, ?, ?, ?)",
-                (index, contract_no, filename, supplier, main_date, has_sheet, sheet_start),
-            )
-            cid = cur.lastrowid
-        else:
-            cid = row[0]
-            conn.execute(
-                "UPDATE contracts SET source_order=?, supplier_name=?, main_contract_date=?, "
-                "has_order_sheet=?, order_sheet_start_paragraph=? WHERE id=?",
-                (index, supplier, main_date, has_sheet, sheet_start, cid),
-            )
-            conn.execute("DELETE FROM contract_sign_dates WHERE contract_id=?", (cid,))
-        for pos, value in enumerate(record.get("签署日期") or []):
-            conn.execute(
-                "INSERT INTO contract_sign_dates(contract_id, position, sign_date) VALUES(?, ?, ?)",
-                (cid, pos, str(value)),
-            )
-    for index, record in enumerate(main_info.get("供应商主合同") or []):
-        conn.execute(
-            "INSERT INTO supplier_main_contracts(source_order, supplier_name, latest_main_contract_date, "
-            "contract_no, filename, contract_count) VALUES(?, ?, ?, ?, ?, ?)",
-            (
-                index, str(record.get("供应商") or ""), str(record.get("最新主合同日期") or ""),
-                str(record.get("合同号") or ""), str(record.get("文件名") or ""),
-                int(record.get("合同份数") or 0),
-            ),
-        )
-    fields = (
-        ("合同号", "contract_no"), ("文件夹", "folder"), ("文件名", "filename"),
-        ("供应商", "supplier_name"), ("产品名称", "product_name"), ("规格", "spec"),
-        ("数量", "quantity_text"), ("单价", "unit_price_text"),
-        ("总金额", "total_amount_text"), ("备注", "remark"),
-        ("付款方式", "payment_terms"), ("图片", "image"),
-    )
-    for index, record in enumerate(history):
-        columns = ["source_order"] + [col for _cn, col in fields]
-        params = [index] + [str(record.get(cn) or "") for cn, _col in fields]
-        conn.execute(
-            "INSERT INTO historical_order_items(%s) VALUES(%s)" %
-            (",".join(columns), ",".join("?" for _ in columns)), params,
-        )
-    _set_meta(conn, "history_source_signature", _history_source_signature())
-
-
-def _migrate_legacy(conn):
-    products, suppliers = read_data_js()
-    if products or suppliers:
-        _insert_catalog(conn, products, suppliers)
-
-    archive = _read_json(DATA_DIR / "供应商档案.json", {})
-    for index, record in enumerate(archive.get("供应商") or []):
-        columns, params = [], []
-        for cn, col in PROFILE_FIELDS.items():
-            columns.append(col)
-            params.append(str(record.get(cn) or ""))
-        conn.execute(
-            "INSERT INTO supplier_profiles(%s) VALUES(%s)" %
-            (",".join(columns), ",".join("?" for _ in columns)), params,
-        )
-    for name, payload in (archive.get("甲方备选") or {}).items():
-        conn.execute(
-            "INSERT OR REPLACE INTO party_a_profiles(name, payload) VALUES(?, ?)",
-            (name, json.dumps(payload, ensure_ascii=False)),
-        )
-
-    _replace_history_sources(conn)
-
-    imported = _read_json(DATA_DIR / "_已收录合同.json", {})
-    _write_imported_index(conn, imported)
-
-    if not _table_exists(conn, "legacy_products"):
-        return                       # P2 之后新库不再建遗留表，直接跳过这段
-
-    for record in _read_json(DATA_DIR / "产品主库.json", []):
-        conn.execute(
-            "INSERT OR REPLACE INTO legacy_products(legacy_id, name, spec, occurrence_count, "
-            "suppliers_json, categories_json, prices_json, aliases_json) VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                str(record.get("id") or ""), str(record.get("产品名称") or ""),
-                str(record.get("规格") or ""), int(record.get("出现次数") or 0),
-                json.dumps(record.get("供应商列表") or [], ensure_ascii=False),
-                json.dumps(record.get("项目分类") or [], ensure_ascii=False),
-                json.dumps(record.get("历史价格") or [], ensure_ascii=False),
-                json.dumps(record.get("别名") or [], ensure_ascii=False),
-            ),
-        )
-    legacy_suppliers = _read_json(DATA_DIR / "供应商主库.json", [])
-    for record in legacy_suppliers:
-        name = str(record.get("供应商名称") or "")
-        conn.execute(
-            "INSERT OR REPLACE INTO legacy_suppliers(name, phone, product_count) VALUES(?, ?, ?)",
-            (name, str(record.get("电话") or ""), int(record.get("产品数") or 0)),
-        )
-    for record in legacy_suppliers:
-        for pos, legacy_id in enumerate(record.get("产品keys") or []):
-            conn.execute(
-                "INSERT OR REPLACE INTO legacy_supplier_products(supplier_name, position, legacy_product_id) "
-                "VALUES(?, ?, ?)",
-                (str(record.get("供应商名称") or ""), pos, str(legacy_id)),
-            )
-
-
 def ensure_database():
     """首次启动自动迁移；标记检查和迁移在同一立即写事务中。"""
     existed = DB_PATH.exists()
@@ -1521,15 +1341,7 @@ def ensure_database():
         if pending and existed:
             backup_database("before_migration_v%d" % pending[0][0])
         with session(write=True) as conn:
-            migrated = _meta(conn, "legacy_import_completed")
-            if not migrated:
-                _migrate_legacy(conn)
-                _set_meta(conn, "legacy_import_completed", time.strftime("%Y-%m-%d %H:%M:%S"))
             _apply_migrations(conn)
-            history_files = (DATA_DIR / "供应商主合同信息.json", DATA_DIR / "合同提取记录.json")
-            if all(path.exists() for path in history_files):
-                if _meta(conn, "history_source_signature") != _history_source_signature():
-                    _replace_history_sources(conn)
     return str(DB_PATH)
 
 

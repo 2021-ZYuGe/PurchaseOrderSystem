@@ -1,30 +1,17 @@
-# 业务数据（绝不提交）
+# 用户数据（绝不提交）
 data/
-web/data.js
-web/data.js.*
-web/图片/
-web/_生成合同/
 *.db
 *.db-wal
 *.db-shm
 
-# 业务资产
-运行环境/
-合同模板/
+# 业务资产（含真实供应商信息，仅本地保留）
+runtime/
+templates/
 projects/
 *.docx
 
-# 回归样例（含真实供应商/联系人/银行信息，只保留在本地）
-tests/golden/
-tests/fixtures/
-tests/smoke_test.py
-tests/diff_golden.py
-tests/make_golden.py
-tests/run_all.py
-回归自检.bat
-
 # 运行时产物
-dist/
+/dist/
 __pycache__/
 *.py[cod]
 _增量批次_*/
@@ -34,7 +21,7 @@ _增量批次_*/
 *.bak
 *.bak_*
 
-# 系统文件
+# 工具与系统文件
 *.lnk
 *.png
 *.ico
@@ -43,3 +30,9 @@ desktop.ini
 Thumbs.db
 .workbuddy/
 .vscode/
+.agents/
+.codebuddy/
+
+# 前端依赖与构建缓存
+node_modules/
+web/.vite/

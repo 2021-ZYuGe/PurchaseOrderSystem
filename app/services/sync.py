@@ -4,8 +4,6 @@
 P1 仍然走子进程（和原来完全一致），P5 会改成服务内调用 + 进度上报。
 """
 import os
-import subprocess
-import sys
 import threading
 import time
 
@@ -16,9 +14,6 @@ from app.infra.logging import log
 
 SYNC_LOCK = threading.Lock()
 SYNC_STATE = {"state": "idle", "total": 0, "started": "", "finished": "", "message": ""}
-SYNC_PY = os.path.join(config.ROOT, '运行环境', 'python.exe')
-if not os.path.exists(SYNC_PY):
-    SYNC_PY = sys.executable
 
 
 def _sync_status():
@@ -59,16 +54,13 @@ def _sync_worker(items):
     messages, ok_all = [], True
     for root, paths in groups.items():
         listfile = str(config.DATA_DIR / ('_待导入清单_%d.txt' % int(time.time() * 1000)))
+        lines = []
         try:
             with open(listfile, 'w', encoding='utf-8') as f:
                 f.write("\n".join(paths))
-            cmd = [SYNC_PY, str(config.MERGE_SCRIPT),
-                   '--files', listfile, '--yes', root]
-            result = subprocess.run(
-                cmd, cwd=config.ROOT, stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=1800,
-            )
-            text = result.stdout.decode('gbk', errors='replace')
+            from app.domain import merge
+            merge.run_files(listfile, root, on_line=lines.append)
+            text = "\n".join(lines)
             if "合并完成" in text:
                 messages.append("导入 %d 份成功" % len(paths))
             else:
