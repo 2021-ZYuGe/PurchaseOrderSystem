@@ -31,16 +31,16 @@
 
 ## 4. 领域层下沉
 
-- [ ] 4.1 用 v1 生成 3 份基线文档（主合同、信息表、订购清单）存入 `data/_archive/baseline/`；验证：3 份 docx 都能用 Word 打开
+- [x] 4.1 用 v1 生成 3 份基线文档（主合同、信息表、订购清单）存入 `data/_archive/baseline/`；验证：3 份 docx 都能用 Word 打开
 - [x] 4.2 抽出 `domain/parser.py`（金额大写、签约日期、表格识别、单元格图片），按函数搬迁不改逻辑；验证：同一批 10 份合同解析结果与旧脚本逐字段一致
 - [x] 4.3 抽出 `domain/merge.py`（产品/供应商合并、合同台账、收录索引）；验证：合并同一批次后 products、suppliers、contracts 计数与旧脚本一致
 - [x] 4.4 `import_service` 改为进程内调用 parser 与 merge，进度用回调上报；验证：导入 10 份合同，进度单调递增且任务管理器无子进程
 - [x] 4.5 用 `docx_diff.py` 比对 v1 与 v2 生成的 3 份文档，确认零差异后再删除旧脚本；验证：输出"内容一致"
-- [ ] 4.6 `contract_doc.py` 内部标识符英文化（模板占位符不动），逻辑零改动；验证：diff 只包含改名，`docx_diff` 仍然一致
+- [x] 4.6 `contract_doc.py` 内部标识符英文化（模板占位符不动），逻辑零改动；验证：diff 只包含改名，`docx_diff` 仍然一致
 
 ## 5. 数据层拆分
 
-- [ ] 5.1 抽出 `infra/schema.py`（SCHEMA + MIGRATIONS）；验证：全新库初始化后 `schema_version=3`
+- [x] 5.1 抽出 `infra/schema.py`（SCHEMA + MIGRATIONS）；验证：全新库初始化后 `schema_version=3`
 - [x] 5.2 实现 `repositories/catalog.py`（搜索、产品详情、目录元信息）；验证：同一组 20 个关键字，搜索结果与 v1 逐条一致
 - [x] 5.3 实现 `repositories/suppliers.py`（列表、档案、合同期限）；验证：供应商 165 家、档案 93 条读取一致
 - [x] 5.4 实现 `repositories/contracts.py`（台账、到期分桶、待导入扫描）；验证：到期分桶结果与 v1 一致
@@ -70,7 +70,7 @@
 - [x] 8.1 功能清单逐项走查：快捷方式启动、关页退出、搜索、下单、付款、生成、档案、到期、导入、备份；验证：全部通过并留有记录
 - [x] 8.2 本机两套目录模拟：A 目录全新解压使用，B 目录从 v1 覆盖升级；验证：B 数据零丢失，A 首启向导可用
 - [x] 8.3 本机用便携运行时启动发布包，确认不依赖系统 Python 与 Node；验证：`start.bat` 正常起服务（多机验证在开发完成后单独进行）
-- [ ] 8.4 合并 `rewrite` 分支并打 `v2` tag；验证：主分支可运行，v1 发布包仍可回退
+- [x] 8.4 合并 `rewrite` 分支并打 `v2` tag；验证：主分支可运行，v1 发布包仍可回退
 
 ## Workflow follow-up
 
