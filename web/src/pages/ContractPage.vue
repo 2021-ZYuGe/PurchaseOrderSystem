@@ -1,18 +1,13 @@
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import SearchSelect from '../components/SearchSelect.vue'
 import PayModePicker from '../components/PayModePicker.vue'
 import { fetchArchive, saveArchive } from '../api/catalog'
-import {
-  generateContract,
-  generateInfoSheet,
-  removeTerm,
-  saveTerm,
-} from '../api/contracts'
+import { generateContract, generateInfoSheet } from '../api/contracts'
 import { usePayThreshold } from '../composables/usePayThreshold'
-import { useExpiry } from '../composables/useExpiry'
 import { useToast } from '../composables/useToast'
-import { cnDate, daysLeft, inputToCents, resolveOutputUrl, todayISO } from '../lib/format'
+import { inputToCents, resolveOutputUrl, todayISO } from '../lib/format'
 
 const PARTY_A_CODES = {
   广州兴趣岛信息科技有限公司: '91440104MA59C33C5N',
@@ -54,8 +49,8 @@ function loadPartyA() {
 }
 
 const { threshold, setThreshold } = usePayThreshold()
-const { expiry, loading: expiryLoading, error: expiryError, load: loadExpiry } = useExpiry()
 const { success: toastSuccess } = useToast()
+const route = useRoute()
 
 const mode = ref('')
 const type = ref('batch')
@@ -113,45 +108,6 @@ const stepPartyA = computed(() => (mode.value === 'renew' ? 5 : 4))
 const stepTerms = computed(() => (mode.value === 'renew' ? 6 : 5))
 
 const amountCents = computed(() => inputToCents(form.terms.order_amount))
-
-const expiryItems = computed(() => {
-  const items = (expiry.value && expiry.value.items) || []
-  return items
-    .filter((item) => {
-      const left = daysLeft(item.end_date)
-      return left !== null && left <= 30
-    })
-    .sort((a, b) => (daysLeft(a.end_date) ?? 0) - (daysLeft(b.end_date) ?? 0))
-})
-
-function findExpiryByName(name) {
-  if (!name) return null
-  const items = (expiry.value && expiry.value.items) || []
-  return items.find((item) => item.supplier === name) || null
-}
-
-const pickedExpiry = computed(() => {
-  const profile = selectedArchive.value
-  return profile && profile.name ? findExpiryByName(profile.name) : null
-})
-
-const expiredCount = computed(
-  () => expiryItems.value.filter((item) => (daysLeft(item.end_date) ?? 0) < 0).length,
-)
-const soonCount = computed(() => expiryItems.value.length - expiredCount.value)
-const expiryUrgent = computed(() =>
-  expiryItems.value.some((item) => (daysLeft(item.end_date) ?? 99) <= 7),
-)
-
-const termOpen = ref(false)
-const termItem = ref(null)
-const termError = ref('')
-const termSaving = ref(false)
-const termForm = reactive({ supplier: '', start_date: '', end_date: '', note: '' })
-const canDeleteTerm = computed(() => {
-  const source = String((termItem.value && termItem.value.source) || '')
-  return source === 'manual' || source.includes('手工')
-})
 
 const REQUIRED = {
   batch: [
@@ -416,85 +372,6 @@ async function saveOnly() {
   }
 }
 
-function renewFromExpiry(item) {
-  mode.value = 'renew'
-  pickedInfo.value = ''
-  formError.value = ''
-  const name = item.supplier || ''
-  const hit = archive.value.find((profile) => profile.name === name)
-  if (hit) {
-    selectedArchive.value = hit
-    onArchivePick(hit)
-  } else {
-    selectedArchive.value = { name }
-    clearPartyB()
-    form.party_b.name = name
-    pickedInfo.value = '档案里没有 ' + name + ' 的完整信息，已填公司名，其余请手工补充。'
-  }
-}
-
-function openTerm(item) {
-  termItem.value = item
-  termForm.supplier = item.supplier
-  termForm.start_date = item.start_date || ''
-  termForm.end_date = item.end_date || ''
-  termForm.note = item.note || ''
-  termError.value = ''
-  termOpen.value = true
-}
-
-function closeTerm() {
-  termOpen.value = false
-  termItem.value = null
-}
-
-async function submitTerm() {
-  termError.value = ''
-  if (!termForm.end_date) {
-    termError.value = '请填写到期日期'
-    return
-  }
-  if (termForm.start_date && termForm.end_date < termForm.start_date) {
-    termError.value = '到期日期不能早于起始日期'
-    return
-  }
-  termSaving.value = true
-  try {
-    const data = await saveTerm({ ...termForm })
-    if (data.overview) expiry.value = data.overview
-    closeTerm()
-    toastSuccess('合同期限已保存')
-  } catch (e) {
-    termError.value = e && e.message ? e.message : String(e)
-  } finally {
-    termSaving.value = false
-  }
-}
-
-async function deleteTermEntry() {
-  if (!termItem.value) return
-  termSaving.value = true
-  termError.value = ''
-  try {
-    const data = await removeTerm(termForm.supplier)
-    if (data.overview) expiry.value = data.overview
-    closeTerm()
-    toastSuccess('已撤销手工登记的期限')
-  } catch (e) {
-    termError.value = e && e.message ? e.message : String(e)
-  } finally {
-    termSaving.value = false
-  }
-}
-
-function leftText(endDate) {
-  const left = daysLeft(endDate)
-  if (left === null) return '—'
-  if (left < 0) return `已过期 ${-left} 天`
-  if (left === 0) return '今天到期'
-  return `剩 ${left} 天`
-}
-
 watch(
   () => form.party_a.name,
   (name) => {
@@ -521,9 +398,29 @@ watch(
   { deep: true },
 )
 
-onMounted(() => {
-  loadArchive()
-  loadExpiry(true).catch(() => {})
+async function applyRenewQuery() {
+  mode.value = 'renew'
+  const name = String(route.query.supplier || '').trim()
+  await loadArchive()
+  if (!name) return
+  const hit = archive.value.find((profile) => profile.name === name)
+  if (hit) {
+    selectedArchive.value = hit
+    onArchivePick(hit)
+  } else {
+    selectedArchive.value = { name }
+    clearPartyB()
+    form.party_b.name = name
+    pickedInfo.value = '档案里没有 ' + name + ' 的完整信息，已填公司名，其余请手工补充。'
+  }
+}
+
+onMounted(async () => {
+  if (String(route.query.mode || '') === 'renew') {
+    await applyRenewQuery()
+  } else {
+    await loadArchive()
+  }
 })
 </script>
 
@@ -533,67 +430,6 @@ onMounted(() => {
       <h1>新增主合同</h1>
       <p class="muted">新签 / 续签 · 生成 Word 主合同或供应商信息收集表</p>
     </div>
-
-    <section class="card">
-      <div class="card-title">
-        合同到期提醒
-        <span class="muted title-note">只显示 30 天内与已过期</span>
-        <button
-          type="button"
-          class="btn btn-ghost btn-sm title-action"
-          :disabled="expiryLoading"
-          @click="loadExpiry(true)"
-        >
-          {{ expiryLoading ? '读取中…' : '刷新' }}
-        </button>
-      </div>
-
-      <div v-if="expiryError && !expiry" class="notice notice-error">
-        到期数据读取失败：{{ expiryError }}
-      </div>
-      <div v-else-if="!expiry" class="empty-text">正在读取合同期限…</div>
-      <div v-else-if="!expiryItems.length" class="notice notice-ok">
-        近 30 天没有到期的合同<span v-if="expiry && expiry.today">（数据截至 {{ expiry.today }}）</span>。
-      </div>
-      <template v-else>
-        <div class="notice" :class="expiryUrgent ? 'notice-error' : 'notice-warn'">
-          已过期 <b>{{ expiredCount }}</b> 家，30 天内到期 <b>{{ soonCount }}</b> 家
-          <span v-if="expiry && expiry.today" class="muted">（数据截至 {{ expiry.today }}）</span>。
-          核实后续签，或点「修改期限」补录到期日。
-        </div>
-        <div class="table-scroll stack-top">
-          <table class="data-table expiry-table">
-            <thead>
-              <tr>
-                <th>供应商</th>
-                <th style="width: 120px">到期日</th>
-                <th style="width: 110px">剩余</th>
-                <th style="width: 110px">合同号</th>
-                <th style="width: 150px"></th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="item in expiryItems" :key="item.supplier">
-                <td>
-                  <b>{{ item.supplier }}</b>
-                  <span v-if="item.pending" class="tag tag-plain">需核对</span>
-                  <div v-if="item.last_sign_date" class="hint">最近签约 {{ item.last_sign_date }}</div>
-                </td>
-                <td>{{ cnDate(item.end_date) }}</td>
-                <td :class="(daysLeft(item.end_date) ?? 99) <= 7 ? 'text-danger' : ''">
-                  {{ leftText(item.end_date) }}
-                </td>
-                <td class="muted">{{ item.contract_no || '—' }}</td>
-                <td class="cell-ops">
-                  <button type="button" class="btn-link" @click="renewFromExpiry(item)">续签</button>
-                  <button type="button" class="btn-link" @click="openTerm(item)">修改期限</button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </template>
-    </section>
 
     <section class="card">
       <div class="card-title"><span class="step">1</span>这次是哪种情况</div>
@@ -644,13 +480,6 @@ onMounted(() => {
       </div>
       <div v-if="pickedInfo" class="notice notice-ok stack-top">
         <div>{{ pickedInfo }}</div>
-        <div v-if="pickedExpiry && pickedExpiry.end_date" class="notice-line">
-          当前合同：{{ pickedExpiry.start_date ? cnDate(pickedExpiry.start_date) + ' 至 ' : '至 ' }}
-          <b>{{ cnDate(pickedExpiry.end_date) }}</b>（{{ leftText(pickedExpiry.end_date) }}）
-          <span v-if="(daysLeft(pickedExpiry.end_date) ?? 99) <= 30" class="text-danger">
-            ，建议按续签办理
-          </span>
-        </div>
       </div>
     </section>
 
@@ -900,41 +729,5 @@ onMounted(() => {
         生成后请务必打开核对：公司名、账号、开户行、税率、金额、日期。
       </div>
     </section>
-
-    <div v-if="termOpen" class="modal-mask" @click.self="closeTerm">
-      <div class="modal-panel term-panel">
-        <div class="modal-title">登记合同期限</div>
-        <div class="hint">{{ termForm.supplier }}</div>
-        <div class="field">
-          <label class="field-label">起始日期（可不填）</label>
-          <input v-model="termForm.start_date" type="date" />
-        </div>
-        <div class="field">
-          <label class="field-label">到期日期</label>
-          <input v-model="termForm.end_date" type="date" />
-        </div>
-        <div class="field">
-          <label class="field-label">备注（可不填）</label>
-          <input v-model="termForm.note" placeholder="如：续签待用印 / 按 1 年推算" />
-        </div>
-        <div v-if="termError" class="notice notice-error">{{ termError }}</div>
-        <div class="modal-actions">
-          <button
-            v-if="canDeleteTerm"
-            type="button"
-            class="btn btn-ghost btn-danger"
-            :disabled="termSaving"
-            @click="deleteTermEntry"
-          >
-            撤销登记
-          </button>
-          <span class="spacer"></span>
-          <button type="button" class="btn btn-ghost" @click="closeTerm">取消</button>
-          <button type="button" class="btn btn-primary" :disabled="termSaving" @click="submitTerm">
-            {{ termSaving ? '保存中…' : '保存' }}
-          </button>
-        </div>
-      </div>
-    </div>
   </div>
 </template>

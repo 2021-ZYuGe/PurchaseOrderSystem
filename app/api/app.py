@@ -70,6 +70,7 @@ def create_app():
 
     # 旧书签/快捷方式兼容：/contract.html → /#/contract
     for _old, _new in (('/contract.html', '/#/contract'),
+                       ('/expiry.html', '/#/expiry'),
                        ('/import.html', '/#/import'),
                        ('/welcome.html', '/#/welcome')):
         def _legacy_page(target=_new):

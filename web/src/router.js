@@ -9,10 +9,16 @@ const routes = [
     meta: { title: '下单' },
   },
   {
+    path: '/expiry',
+    name: 'expiry',
+    component: () => import('./pages/ExpiryPage.vue'),
+    meta: { title: '合同倒计时' },
+  },
+  {
     path: '/contract',
     name: 'contract',
     component: () => import('./pages/ContractPage.vue'),
-    meta: { title: '主合同' },
+    meta: { title: '新增主合同' },
   },
   {
     path: '/import',

@@ -295,7 +295,7 @@ onMounted(() => {
             </span>
             <span v-if="supplierContract.expiry.pending" class="tag tag-plain">需核对</span>
           </div>
-          <div v-else class="hint">合同期限：未登记到期日，可到合同页顶部登记。</div>
+          <div v-else class="hint">合同期限：未登记到期日，可到「合同倒计时」页登记。</div>
           <div class="hint">
             本次下单只需出《产品订购清单》，清单会自动引用最近的签约日期，无需重复签主体合同。
           </div>

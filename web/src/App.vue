@@ -3,18 +3,26 @@ import { computed, onMounted } from 'vue'
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 import ToastHost from './components/ToastHost.vue'
 import { useCatalog } from './composables/useCatalog'
+import { useExpiry } from './composables/useExpiry'
 import { fetchSetupStatus } from './api/setup'
 
 const route = useRoute()
 const router = useRouter()
 const { meta, loadMeta } = useCatalog()
+const { expiry, load: loadExpiry } = useExpiry()
 
 const navs = [
   { to: '/order', label: '下单' },
-  { to: '/contract', label: '合同' },
+  { to: '/expiry', label: '合同倒计时' },
+  { to: '/contract', label: '新增主合同' },
   { to: '/import', label: '导入' },
   { to: '/system', label: '系统状态' },
 ]
+
+const urgentCount = computed(() => {
+  const counts = (expiry.value && expiry.value.counts) || {}
+  return (counts.expired || 0) + (counts.d3 || 0) + (counts.d7 || 0) + (counts.d30 || 0)
+})
 
 const metaText = computed(() => {
   const data = meta.value
@@ -28,6 +36,7 @@ const metaText = computed(() => {
 
 onMounted(async () => {
   loadMeta(true).catch(() => {})
+  loadExpiry().catch(() => {})
   try {
     const status = await fetchSetupStatus()
     if ((status.need_setup || !status.products) && route.name !== 'welcome') {
@@ -49,6 +58,9 @@ onMounted(async () => {
       <nav class="app-nav">
         <RouterLink v-for="item in navs" :key="item.to" :to="item.to" class="nav-link">
           {{ item.label }}
+          <span v-if="item.to === '/expiry' && urgentCount" class="nav-badge">
+            {{ urgentCount }}
+          </span>
         </RouterLink>
       </nav>
       <div class="header-right">
