@@ -1226,3 +1226,8 @@ a {
     width: 78px;
   }
 }
+
+.page-heading { margin: 0 0 16px; }
+.page-heading h1 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: .5px; }
+.page-heading p { margin: 4px 0 0; font-size: 13px; }
+

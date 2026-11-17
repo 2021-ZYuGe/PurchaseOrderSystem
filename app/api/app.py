@@ -7,7 +7,7 @@ import time
 import traceback
 from pathlib import Path
 
-from flask import (Flask, Response, abort, request, send_file,
+from flask import (Flask, Response, abort, redirect, request, send_file,
                    send_from_directory, stream_with_context)
 from werkzeug.exceptions import HTTPException
 
@@ -67,6 +67,15 @@ def create_app():
     @app.get('/')
     def index():
         return send_from_directory(str(config.WEB_DIR), 'index.html')
+
+    # 旧书签/快捷方式兼容：/contract.html → /#/contract
+    for _old, _new in (('/contract.html', '/#/contract'),
+                       ('/import.html', '/#/import'),
+                       ('/welcome.html', '/#/welcome')):
+        def _legacy_page(target=_new):
+            return redirect(target, code=302)
+        app.add_url_rule(_old, endpoint='legacy:%s' % _old, view_func=_legacy_page,
+                         methods=['GET'])
 
     @app.get('/media/<path:name>')
     @app.get('/图片/<path:name>')

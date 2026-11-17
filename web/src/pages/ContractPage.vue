@@ -529,6 +529,11 @@ onMounted(() => {
 
 <template>
   <div class="page page-narrow">
+    <div class="page-heading">
+      <h1>新增主合同</h1>
+      <p class="muted">新签 / 续签 · 生成 Word 主合同或供应商信息收集表</p>
+    </div>
+
     <section class="card">
       <div class="card-title">
         合同到期提醒
