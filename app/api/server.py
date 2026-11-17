@@ -147,7 +147,8 @@ def _watch_pages():
 
 def _landing(first_run):
     """首次没有数据时进向导；新前端用 hash 路由，旧页面用 welcome.html"""
-    if config.WEB_DIR.name == 'dist':
+    spa = os.path.isdir(os.path.join(WEB, 'assets'))
+    if spa:
         return '/#/welcome' if first_run else '/'
     return '/welcome.html' if first_run else OPEN_PATH
 
