@@ -98,6 +98,18 @@ def expiry(data):
     }
 
 
+def contract_search_item(item):
+    return {
+        'supplier': item.get('供应商', ''),
+        'contract_no': item.get('合同号', ''),
+        'filename': item.get('文件名', ''),
+        'sign_date': item.get('签署日期', ''),
+        'main_date': item.get('主合同日期', ''),
+        'start_date': item.get('合同起始', ''),
+        'end_date': item.get('合同截止', ''),
+    }
+
+
 def freshness(data):
     return {
         'data_updated_at': data.get('数据更新时间', ''),

@@ -83,6 +83,16 @@
   "newest_file": "", "newest_date": "", "samples": [], "checked_at": ""}}
 ```
 
+### GET `/api/contracts/search?q=S26006440&limit=50`
+按供应商、合同号、文件名模糊搜索合同台账；多个关键词用空格分隔，按 AND 匹配。
+`limit` 默认 50，最大 100。
+```json
+{"query": "S26006440", "items": [{"supplier": "广州市宝优科技有限公司",
+  "contract_no": "S26006440", "filename": "S26006440_..._采购合同.doc",
+  "sign_date": "2026-05-26", "main_date": "2026-05-26",
+  "start_date": "2026-05-26", "end_date": "2027-05-25"}]}
+```
+
 ### POST `/api/contracts`
 请求体（字段与旧页面 collect 一致）：
 ```json

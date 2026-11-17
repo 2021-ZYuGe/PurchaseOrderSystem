@@ -45,6 +45,19 @@ def status():
     })
 
 
+def search():
+    query = (request.args.get('q') or '').strip()
+    try:
+        limit = max(1, min(100, int(request.args.get('limit') or 50)))
+    except ValueError:
+        limit = 50
+    items = contract_repo.search_contracts(query, limit)
+    return ok({
+        'query': query,
+        'items': [serializers.contract_search_item(item) for item in items],
+    })
+
+
 def _result(payload):
     result = payload or {}
     if result.get('ok') is False:

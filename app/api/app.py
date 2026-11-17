@@ -39,6 +39,7 @@ def create_app():
 
     route('/api/contracts/expiry', ['GET'], contracts.expiry)
     route('/api/contracts/status', ['GET'], contracts.status)
+    route('/api/contracts/search', ['GET'], contracts.search)
     route('/api/contracts/terms', ['POST'], contracts.save_term)
     route('/api/contracts/terms', ['DELETE'], contracts.delete_term)
     route('/api/contracts', ['POST'], contracts.generate)

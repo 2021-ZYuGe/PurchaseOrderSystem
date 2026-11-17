@@ -1276,6 +1276,42 @@ def search_suppliers(query):
     return [s for s in items if q in _norm_text(s["供应商名称"])]
 
 
+def search_contracts(query, limit=50):
+    """按供应商 / 合同号 / 文件名查具体合同，多个关键词按 AND 处理。"""
+    text = str(query or "").strip()
+    if not text:
+        return []
+    terms = [term for term in re.split(r"\s+", text) if term][:5]
+    conditions, params = [], []
+    for term in terms:
+        like = "%" + _like_escape(term) + "%"
+        conditions.append(
+            "(c.supplier_name LIKE ? ESCAPE '\\' "
+            "OR c.contract_no LIKE ? ESCAPE '\\' "
+            "OR c.filename LIKE ? ESCAPE '\\')"
+        )
+        params.extend([like, like, like])
+    sql = (
+        "SELECT c.*, (SELECT MAX(s.sign_date) FROM contract_sign_dates s "
+        "WHERE s.contract_id=c.id) AS last_sign FROM contracts c WHERE "
+        + " AND ".join(conditions)
+        + " ORDER BY CASE WHEN c.main_contract_date='' THEN 1 ELSE 0 END, "
+          "c.main_contract_date DESC, c.id DESC LIMIT ?"
+    )
+    params.append(max(1, min(100, int(limit or 50))))
+    with session() as conn:
+        rows = conn.execute(sql, params).fetchall()
+    return [{
+        "供应商": row["supplier_name"] or "",
+        "合同号": row["contract_no"] or "",
+        "文件名": row["filename"] or "",
+        "签署日期": row["last_sign"] or "",
+        "主合同日期": row["main_contract_date"] or "",
+        "合同起始": row["contract_start_date"] or "",
+        "合同截止": row["contract_end_date"] or "",
+    } for row in rows]
+
+
 def schema_info():
     """当前程序要求的结构版本 + 已应用的迁移版本"""
     with session() as conn:

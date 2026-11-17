@@ -8,6 +8,10 @@ export function fetchContractStatus() {
   return getJSON('/api/contracts/status')
 }
 
+export function searchContracts(q, limit = 50) {
+  return getJSON('/api/contracts/search', { query: { q, limit } })
+}
+
 export function generateContract(payload) {
   return postJSON('/api/contracts', payload, { timeout: 120000 })
 }

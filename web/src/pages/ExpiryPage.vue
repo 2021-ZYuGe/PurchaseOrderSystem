@@ -1,7 +1,7 @@
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { removeTerm, saveTerm } from '../api/contracts'
+import { removeTerm, saveTerm, searchContracts } from '../api/contracts'
 import { useExpiry } from '../composables/useExpiry'
 import { useToast } from '../composables/useToast'
 import { cnDate, daysLeft } from '../lib/format'
@@ -11,6 +11,13 @@ const { expiry, loading, error, load } = useExpiry()
 const { success: toastSuccess } = useToast()
 
 const filter = ref('all')
+const keyword = ref('')
+const searchResults = ref([])
+const searching = ref(false)
+const searchError = ref('')
+let searchTimer = null
+let searchSeq = 0
+
 const termOpen = ref(false)
 const termItem = ref(null)
 const termError = ref('')
@@ -75,6 +82,41 @@ function periodText(item) {
   return '—'
 }
 
+function searchPeriod(item) {
+  if (item.start_date && item.end_date) {
+    return `${cnDate(item.start_date)} 至 ${cnDate(item.end_date)}`
+  }
+  if (item.end_date) return `至 ${cnDate(item.end_date)}`
+  return '—'
+}
+
+watch(keyword, (value) => {
+  clearTimeout(searchTimer)
+  const text = String(value || '').trim()
+  searchError.value = ''
+  if (!text) {
+    searchSeq += 1
+    searchResults.value = []
+    searching.value = false
+    return
+  }
+  searching.value = true
+  const seq = ++searchSeq
+  searchTimer = setTimeout(async () => {
+    try {
+      const data = await searchContracts(text)
+      if (seq === searchSeq) searchResults.value = data.items || []
+    } catch (e) {
+      if (seq === searchSeq) {
+        searchResults.value = []
+        searchError.value = e && e.message ? e.message : String(e)
+      }
+    } finally {
+      if (seq === searchSeq) searching.value = false
+    }
+  }, 250)
+})
+
 function renew(item) {
   router.push({ path: '/contract', query: { mode: 'renew', supplier: item.supplier } })
 }
@@ -136,6 +178,10 @@ async function deleteTermEntry() {
 onMounted(() => {
   load(true).catch(() => {})
 })
+
+onBeforeUnmount(() => {
+  clearTimeout(searchTimer)
+})
 </script>
 
 <template>
@@ -161,8 +207,60 @@ onMounted(() => {
         </button>
       </div>
 
+      <div class="search-bar">
+        <input
+          v-model="keyword"
+          type="search"
+          placeholder="搜索供应商 / 合同号 / 文件名，例如 S26006440"
+        />
+        <button v-if="keyword" type="button" class="btn btn-ghost btn-sm" @click="keyword = ''">
+          清空
+        </button>
+      </div>
+
       <div v-if="error && !expiry" class="notice notice-error">到期数据读取失败：{{ error }}</div>
       <div v-else-if="!expiry" class="empty-text">正在读取合同期限…</div>
+      <template v-else-if="keyword.trim()">
+        <div v-if="searching" class="empty-text">正在搜索…</div>
+        <div v-else-if="searchError" class="notice notice-error">搜索失败：{{ searchError }}</div>
+        <div v-else-if="!searchResults.length" class="notice notice-ok">
+          没有找到匹配的合同，换个供应商名、合同号或文件名试试。
+        </div>
+        <template v-else>
+          <div class="hint">
+            找到 {{ searchResults.length }} 份合同
+            <span v-if="searchResults.length >= 50">（只显示前 50 份，请补充关键词）</span>
+          </div>
+          <div class="table-scroll stack-top">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>供应商</th>
+                  <th style="width: 110px">合同号</th>
+                  <th style="width: 110px">签署日期</th>
+                  <th>合同期</th>
+                  <th style="width: 110px">到期日</th>
+                  <th>合同文件</th>
+                  <th style="width: 80px"></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(item, index) in searchResults" :key="index">
+                  <td><b>{{ item.supplier }}</b></td>
+                  <td class="muted">{{ item.contract_no || '—' }}</td>
+                  <td>{{ item.sign_date || item.main_date || item.start_date || '—' }}</td>
+                  <td class="muted">{{ searchPeriod(item) }}</td>
+                  <td>{{ item.end_date ? cnDate(item.end_date) : '未登记' }}</td>
+                  <td class="file-cell" :title="item.filename">{{ item.filename }}</td>
+                  <td class="cell-ops">
+                    <button type="button" class="btn-link" @click="renew(item)">续签</button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </template>
+      </template>
       <template v-else>
         <div class="stat-grid">
           <div class="stat-card stat-danger">
