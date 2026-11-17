@@ -48,8 +48,9 @@ const canDeleteTerm = computed(() => {
   return source === 'manual' || source.includes('手工')
 })
 
-function leftText(endDate) {
-  const left = daysLeft(endDate)
+function leftText(item) {
+  if (item.pending) return '待确认'
+  const left = daysLeft(item.end_date)
   if (left === null) return '未登记'
   if (left < 0) return `已过期 ${-left} 天`
   if (left === 0) return '今天到期'
@@ -57,6 +58,7 @@ function leftText(endDate) {
 }
 
 function leftClass(item) {
+  if (item.pending) return 'text-warn'
   const left = item.days_left
   if (left === null || left === undefined) return 'muted'
   if (left < 0 || left <= 7) return 'text-danger'
@@ -66,9 +68,10 @@ function leftClass(item) {
 
 function periodText(item) {
   if (item.start_date && item.end_date) {
-    return `${cnDate(item.start_date)} 至 ${cnDate(item.end_date)}`
+    const suffix = item.pending ? '（上一份）' : ''
+    return `${cnDate(item.start_date)} 至 ${cnDate(item.end_date)}${suffix}`
   }
-  if (item.end_date) return `至 ${cnDate(item.end_date)}`
+  if (item.end_date) return `至 ${cnDate(item.end_date)}${item.pending ? '（上一份）' : ''}`
   return '—'
 }
 
@@ -234,8 +237,14 @@ onMounted(() => {
                   </div>
                 </td>
                 <td class="muted">{{ periodText(item) }}</td>
-                <td>{{ item.end_date ? cnDate(item.end_date) : '未登记' }}</td>
-                <td :class="leftClass(item)">{{ leftText(item.end_date) }}</td>
+                <td>
+                  <template v-if="item.pending && item.end_date">
+                    待确认
+                    <div class="hint">上一份 {{ cnDate(item.end_date) }}</div>
+                  </template>
+                  <template v-else>{{ item.end_date ? cnDate(item.end_date) : '未登记' }}</template>
+                </td>
+                <td :class="leftClass(item)">{{ leftText(item) }}</td>
                 <td class="muted">{{ item.contract_no || '—' }}</td>
                 <td class="cell-ops">
                   <button type="button" class="btn-link" @click="renew(item)">续签</button>

@@ -3,7 +3,7 @@
 采购下单系统 —— 一键从合同数据生成属于自己的系统
 
 同事用法：
-  1. 把从财务申请导出的合同文件夹放到任意位置（含 .docx 合同的文件夹）
+  1. 把从财务申请导出的合同文件夹放到任意位置（含 .docx / .doc 合同的文件夹）
   2. 双击"工具\\一键生成我的系统.bat"
   3. 按提示输入合同文件夹路径 → 自动生成系统
 
@@ -140,16 +140,19 @@ SIGN_DATE_RE = re.compile(
 )
 
 
-def parse_main_contract_date(doc):
-    """从文档里抓'甲乙双方已于【X】年【Y】月【Z】日签订'"""
-    texts = []
-    for p in doc.paragraphs:
-        texts.append(p.text)
+def doc_text(doc):
+    """把 Word 的段落和表格文字拼成纯文本"""
+    texts = [p.text for p in doc.paragraphs]
     for t in doc.tables:
         for row in t.rows:
-            for c in row.cells:
-                texts.append(c.text)
-    joined = "\n".join(texts)
+            for cell in row.cells:
+                texts.append(cell.text)
+    return "\n".join(texts)
+
+
+def parse_main_contract_date_text(text):
+    """从纯文本里抓'甲乙双方已于【X】年【Y】月【Z】日签订'"""
+    joined = text or ""
     for rx in MAIN_DATE_RES:
         m = rx.search(joined)
         if m:
@@ -159,19 +162,18 @@ def parse_main_contract_date(doc):
     return None
 
 
-def parse_sign_dates(doc):
+def parse_main_contract_date(doc):
+    return parse_main_contract_date_text(doc_text(doc))
+
+
+def parse_sign_dates_text(text):
     """抓落款处的「签署日期：2026年10月23日」。
 
     一份合同通常甲乙双方各写一处，日期可能相同也可能不同，
     这里全部保留，后续取最大值作为“最近签约”。
     """
-    lines = [p.text for p in doc.paragraphs]
-    for t in doc.tables:
-        for row in t.rows:
-            for cell in row.cells:
-                lines.append(cell.text)
     out = []
-    for line in lines:
+    for line in re.split(r"[\r\n]+", text or ""):
         if not line or ("签署日期" not in line and "签订日期" not in line):
             continue
         for m in SIGN_DATE_RE.finditer(line):
@@ -179,6 +181,10 @@ def parse_sign_dates(doc):
             if 2000 <= y <= 2100 and 1 <= mo <= 12 and 1 <= d <= 31:
                 out.append("%04d-%02d-%02d" % (y, mo, d))
     return out[:6]
+
+
+def parse_sign_dates(doc):
+    return parse_sign_dates_text(doc_text(doc))
 
 
 # 合同期限：新版模板「本合同期限为1年，自2026年11月6日起至2027年11月5日止」
@@ -205,23 +211,22 @@ def _clean_term_text(text):
     return re.sub(r"\s+", "", text)
 
 
-def parse_contract_term(doc):
-    """抓合同第十一条的「本合同期限为…自…起至…止」，返回 (起始日, 到期日)。
+def parse_contract_term_text(text):
+    """从纯文本里抓合同第十一条的「本合同期限为…自…起至…止」。
 
     解析不到就返回空字符串，绝不猜日期 —— 没写期限的老合同交给页面手工登记。
     """
-    texts = [p.text for p in doc.paragraphs]
-    for t in doc.tables:
-        for row in t.rows:
-            for cell in row.cells:
-                texts.append(cell.text)
-    cleaned = [_clean_term_text(x) for x in texts if str(x or "").strip()]
+    cleaned = [
+        _clean_term_text(item)
+        for item in re.split(r"[\r\n]+", text or "")
+        if str(item or "").strip()
+    ]
     if not cleaned:
         return "", ""
     # 先逐段找（最准），再整篇拼一次（有的模板把这一条拆成了几个段落/表格单元格）
-    for text in cleaned + ["".join(cleaned)]:
+    for item in cleaned + ["".join(cleaned)]:
         for rx in (TERM_RE, TERM_RANGE_RE):
-            for m in rx.finditer(text):
+            for m in rx.finditer(item):
                 parts = [cn2int(g) for g in m.groups()]
                 if any(p is None for p in parts):
                     continue
@@ -238,6 +243,10 @@ def parse_contract_term(doc):
                     continue
                 return start, end
     return "", ""
+
+
+def parse_contract_term(doc):
+    return parse_contract_term_text(doc_text(doc))
 
 
 def contract_no_of(path):
@@ -266,6 +275,84 @@ def supplier_from_tables(doc):
                     if value and "：" not in value and ":" not in value:
                         return re.split(r"[\s　]", value)[0]
     return ""
+
+
+def legacy_doc_text(path):
+    """从 .doc（Word 97-2003 二进制）里扫出可读文字。
+
+    不依赖 Word/Office：分别按 UTF-16LE 和 GBK 解码，
+    取“日期和合同关键词更多”的那份。
+    """
+    raw = Path(path).read_bytes()
+    best = ""
+    best_score = -1
+    for encoding in ("utf-16-le", "gbk"):
+        text = raw.decode(encoding, "ignore")
+        for ch in ("\x0b", "\x07", "\x0c"):
+            text = text.replace(ch, "\n")
+        text = text.replace("\r", "\n")
+        text = "".join(ch if ch in "\n\t" or ord(ch) >= 32 else " " for ch in text)
+        score = (len(re.findall(r"20\d{2}\s*年", text)) * 10
+                 + text.count("合同") + text.count("乙方"))
+        if score > best_score:
+            best, best_score = text, score
+    return best
+
+
+def supplier_from_text(text):
+    """从 .doc 纯文本里抓乙方名称"""
+    patterns = (
+        r"供货单位[（(]?乙方[）)]?\s*[:：]\s*([^\n]{2,40})",
+        r"乙方[（(]?供货单位[）)]?\s*[:：]\s*([^\n]{2,40})",
+        r"乙方\s*[:：]\s*([^\n]{2,40})",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text or "")
+        if not match:
+            continue
+        value = clean_text(match.group(1))
+        value = re.split(r"[（(]盖章[）)]|地址|联系人|电话|开户|统一社会", value)[0]
+        value = re.sub(r"\s+", "", value).strip(" ：:　")
+        if 2 <= len(value) <= 40 and not is_dirty_name(value):
+            return value
+    return ""
+
+
+def parse_legacy_doc(path):
+    """解析 .doc：只登记供应商、签署日期和合同期限，不提取产品。
+
+    返回 (记录, 跳过原因)。非采购合同、读不到供应商或日期时跳过，不影响整批。
+    """
+    name = Path(path).name
+    text = legacy_doc_text(path)
+    procurement = any(key in name for key in ("采购", "购销", "供货", "订购"))
+    if not procurement:
+        head = text[:8000]
+        procurement = "购销框架" in head or "产品订购" in head
+    if not procurement:
+        return None, "非采购合同"
+    supplier = supplier_from_text(text)
+    if not supplier:
+        return None, "缺供应商"
+    main_date = parse_main_contract_date_text(text)
+    sign_dates = parse_sign_dates_text(text)
+    term_start, term_end = parse_contract_term_text(text)
+    if not main_date and sign_dates:
+        main_date = max(sign_dates)
+    if not (main_date or sign_dates or term_end):
+        return None, "没读到日期"
+    phone = ""
+    match = re.search(r"(1[3-9]\d{9})", text)
+    if match:
+        phone = match.group(1)
+    return {
+        "供应商": supplier,
+        "电话": phone,
+        "主合同日期": main_date or "",
+        "签署日期": sign_dates,
+        "合同起始": term_start,
+        "合同截止": term_end,
+    }, ""
 
 
 def accept_revisions(doc):
@@ -348,10 +435,11 @@ def extract_cell_images(doc, cell):
 
 # ============ 主流程 ============
 def walk_docx(root):
+    """收集 .docx 和 .doc（老版 Word 合同）"""
     files = []
     for dirpath, _, names in os.walk(root):
         for n in names:
-            if n.lower().endswith(".docx") and not n.startswith("~$"):
+            if n.lower().endswith((".docx", ".doc")) and not n.startswith("~$"):
                 files.append(os.path.join(dirpath, n))
     return files
 
@@ -416,9 +504,9 @@ def main(argv=None, workdir=None, interactive=False):
         print("      已中止，原有数据未做任何改动。")
         return
 
-    print(f"\n找到 {len(docs)} 份 docx 合同，开始解析…\n")
+    print(f"\n找到 {len(docs)} 份 Word 合同（.docx / .doc），开始解析…\n")
     if not docs:
-        print("[错误] 该文件夹里没有 .docx 文件。")
+        print("[错误] 该文件夹里没有 .docx 或 .doc 文件。")
         pause()
         return
 
@@ -453,6 +541,43 @@ def main(argv=None, workdir=None, interactive=False):
     for idx, path in enumerate(docs, 1):
         if idx % 5 == 0 or idx == len(docs):
             print(f"  已处理 {idx}/{len(docs)} …")
+        if path.lower().endswith(".doc"):
+            record, reason = parse_legacy_doc(path)
+            if not record:
+                skipped.append(Path(path).name)
+                results.append({
+                    "文件名": Path(path).name, "合同号": contract_no_of(path),
+                    "来源文件": str(path), "结果": "跳过", "原因": reason,
+                    "供应商": "", "正文日期": "",
+                })
+                continue
+            sup_name = record["供应商"]
+            sup = suppliers[sup_name]
+            sup["名称"] = sup_name
+            sup["合同数"] += 1
+            if record["电话"] and not sup["电话"]:
+                sup["电话"] = record["电话"]
+            if record["主合同日期"]:
+                main_dates.append(record["主合同日期"])
+                if record["主合同日期"] > sup["合同日期"]:
+                    sup["合同日期"] = record["主合同日期"]
+            contract_records.append({
+                "合同号": contract_no_of(path),
+                "文件名": Path(path).name,
+                "供应商": sup_name,
+                "主合同日期": record["主合同日期"],
+                "签署日期": record["签署日期"],
+                "合同起始": record["合同起始"],
+                "合同截止": record["合同截止"],
+            })
+            ok += 1
+            results.append({
+                "文件名": Path(path).name, "合同号": contract_no_of(path),
+                "来源文件": str(path), "结果": "成功",
+                "原因": "doc 格式，已登记合同日期，未提取产品",
+                "供应商": sup_name, "正文日期": record["主合同日期"],
+            })
+            continue
         try:
             doc = Document(path)
         except Exception as e:
@@ -654,8 +779,8 @@ def main(argv=None, workdir=None, interactive=False):
     if fail:
         # 部分成功不能覆盖正式库，也不能让增量批次把失败合同标记为已收录。
         raise RuntimeError("有 %d 份合同解析失败，正式数据未更新。请修复或移走失败合同后重试。" % fail)
-    if not products:
-        print("\n[错误] 没提取到任何产品，请确认合同里含标准的产品表格。")
+    if not products and not contract_records:
+        print("\n[错误] 没提取到任何产品，也没有可登记的合同日期。")
         pause()
         return
 

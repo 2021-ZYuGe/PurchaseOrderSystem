@@ -337,7 +337,11 @@ def start_folder(payload):
             return {'ok': False, 'error': '已有导入任务在跑，请等它结束'}
 
     folder_path = Path(path)
-    files = sorted(str(p) for p in folder_path.rglob('*.docx'))
+    files = sorted(
+        str(p) for p in folder_path.rglob('*')
+        if p.is_file() and p.suffix.lower() in ('.docx', '.doc')
+        and not p.name.startswith('~$')
+    )
     if not files:
         return {'ok': False, 'error': '这个文件夹里没有 .docx 合同'}
 

@@ -56,7 +56,11 @@ def import_contracts(folder):
     if not target.is_dir():
         return {'ok': False, 'error': '找不到这个文件夹：%s' % path}
     try:
-        docs = sum(1 for _ in target.rglob('*.docx'))
+        docs = sum(
+            1 for p in target.rglob('*')
+            if p.is_file() and p.suffix.lower() in ('.docx', '.doc')
+            and not p.name.startswith('~$')
+        )
     except OSError as e:
         return {'ok': False, 'error': '读取文件夹失败：%s' % e}
     if docs == 0:

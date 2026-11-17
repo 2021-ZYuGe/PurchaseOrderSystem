@@ -276,7 +276,7 @@ def collect_docx(root):
     out = []
     for dp, _, names in os.walk(root):
         for n in names:
-            if n.lower().endswith(".docx") and not n.startswith("~$"):
+            if n.lower().endswith((".docx", ".doc")) and not n.startswith("~$"):
                 out.append(os.path.join(dp, n))
     return out
 
@@ -428,15 +428,29 @@ def _archive_tool():
     return m
 
 
-def update_archive(paths):
+def update_archive(paths, suppliers=None):
     """把新合同里的乙方信息补进供应商档案（用于主合同续签自动带入）
 
     只补不改：已有的公司，仅补它没有的字段；新公司才追加。
+    旧解析脚本已移除，这里退化为按供应商清单补名称/电话/最近签约。
     """
     try:
         tool = _archive_tool()
         if tool is None:
-            print("  （跳过供应商档案更新：找不到建立供应商档案.py）")
+            records = []
+            for item in suppliers or []:
+                name = (item.get("供应商名称") or "").strip()
+                if not name:
+                    continue
+                records.append({
+                    "名称": name,
+                    "电话": item.get("电话", ""),
+                    "最近签署日期": item.get("主合同日期", ""),
+                    "来源": "导入",
+                })
+            if records:
+                sqlite_store.merge_supplier_profiles(records)
+                print("  供应商档案已更新（名称/电话/最近签约）")
             return
         data = load_archive()
         sup = data.get("供应商") or []
@@ -536,17 +550,17 @@ def main(argv=None):
             root = opts["root"].strip().strip('"').strip("'")
             print("合同路径：%s" % root)
         else:
-            print("请把【新合同所在的文件夹，或单个 .docx 文件】路径粘贴进来后回车。")
+            print("请把【新合同所在的文件夹，或单个 .docx/.doc 文件】路径粘贴进来后回车。")
             print("（已收录过的合同会自动跳过）")
             print()
             root = ask("> ").strip().strip('"').strip("'")
         if os.path.isfile(root):
-            if root.lower().endswith(".docx"):
+            if root.lower().endswith((".docx", ".doc")):
                 file_list = [root]
                 root = os.path.dirname(root)
                 print("本次处理单个文件：%s" % file_list[0])
             else:
-                print("\n[错误] 只支持 .docx 文件：%s" % root)
+                print("\n[错误] 只支持 .docx / .doc 文件：%s" % root)
                 pause()
                 return
 
@@ -673,11 +687,11 @@ def main(argv=None):
         return
 
     new_P, new_S = load_batch_catalog(batch_data)
-    if not new_P:
-        print("[错误] 本批没有有效产品，正式数据库和收录索引均未改动。")
+    batch_contracts = load_batch_contracts(os.path.join(tmp, "web", "_批次合同.json"))
+    if not new_P and not batch_contracts:
+        print("[错误] 本批没有有效产品，也没有可登记的合同日期；正式数据库未改动。")
         pause()
         return
-    batch_contracts = load_batch_contracts(os.path.join(tmp, "web", "_批次合同.json"))
     old_P, old_S = sqlite_store.get_catalog()
 
     print()
@@ -737,7 +751,7 @@ def main(argv=None):
     # ---------- 顺手把新合同里的供应商信息补进档案（主合同续签要用） ----------
     print()
     print("正在更新供应商档案（新合同里的联系人/银行信息）…")
-    update_archive(todo)
+    update_archive(todo, new_S)
 
     # 每批临时产物独立保留，不参与后续批次。
     print("   （本批临时文件：%s）" % tmp)

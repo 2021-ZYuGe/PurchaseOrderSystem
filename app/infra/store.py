@@ -718,7 +718,7 @@ def data_freshness():
 
 
 CONTRACT_NO_RE = re.compile(r"(S\d{8})", re.I)
-CONTRACT_EXTS = (".docx",)
+CONTRACT_EXTS = (".docx", ".doc")
 _PENDING_LOCK = threading.Lock()
 _PENDING_CACHE = {"at": 0.0, "data": None}
 _PENDING_TTL = 30.0
