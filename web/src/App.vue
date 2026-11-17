@@ -64,7 +64,6 @@ onMounted(async () => {
         </RouterLink>
       </nav>
       <div class="header-right">
-        <RouterLink to="/contract" class="header-cta">＋ 主合同</RouterLink>
         <div class="header-meta">{{ metaText }}</div>
       </div>
     </header>

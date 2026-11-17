@@ -120,22 +120,6 @@ a {
   flex-wrap: wrap;
 }
 
-.header-cta {
-  color: var(--brand);
-  background: #fff;
-  text-decoration: none;
-  font-size: 13px;
-  font-weight: 600;
-  padding: 7px 16px;
-  border-radius: 6px;
-  border: 1px solid #fff;
-  white-space: nowrap;
-}
-
-.header-cta:hover {
-  background: #eaf2ff;
-}
-
 .header-meta {
   margin-left: 0;
   font-size: 12px;
