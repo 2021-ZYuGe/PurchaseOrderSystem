@@ -5,15 +5,21 @@ from app.infra.store import (  # noqa: F401
     delete_contract_term,
     expiry_bucket,
     get_supplier_archive,
+    list_party_a,
     list_supplier_profiles,
     merge_supplier_profiles,
+    merge_suppliers,
     save_contract_term,
+    save_party_a,
     save_supplier_profile,
     supplier_contract_stats,
+    supplier_duplicate_candidates,
 )
 
 __all__ = [
     'contract_expiry_overview', 'delete_contract_term', 'expiry_bucket',
-    'get_supplier_archive', 'list_supplier_profiles', 'merge_supplier_profiles',
-    'save_contract_term', 'save_supplier_profile', 'supplier_contract_stats',
+    'get_supplier_archive', 'list_party_a', 'list_supplier_profiles',
+    'merge_supplier_profiles', 'merge_suppliers', 'save_contract_term',
+    'save_party_a', 'save_supplier_profile', 'supplier_contract_stats',
+    'supplier_duplicate_candidates',
 ]

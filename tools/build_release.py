@@ -20,8 +20,8 @@ sys.path.insert(0, str(ROOT))
 import app.config as config
 from app.infra import store
 
-ROOT_FILES = ['start.bat', 'stop.bat', 'maintenance.bat', 'app.ico', 'app.png']
-INCLUDE_DIRS = ['app', 'tools', 'templates']
+ROOT_FILES = ['start.bat', 'stop.bat', 'maintenance.bat']
+INCLUDE_DIRS = ['app', 'tools', 'templates', 'assets']
 SKIP_DIRS = {'__pycache__', 'node_modules', '.vite'}
 SKIP_NAMES = {'data.js', 'data.js.lock', '_icon_preview.png', 'desktop.ini', 'Thumbs.db'}
 SKIP_SUFFIXES = {'.pyc', '.pyo', '.log', '.bak', '.tmp', '.db', '.db-wal', '.db-shm'}

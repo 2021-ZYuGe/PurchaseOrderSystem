@@ -68,36 +68,50 @@ function itemLineCents(item) {
   return inputToCents(item.unitPrice) * (parseInt(item.qty, 10) || 0)
 }
 
+// 导出 Word 时整数金额不带 .00，非整数仍保留两位小数
+function docCents(cents) {
+  const n = Number(cents) || 0
+  return n % 100 === 0 ? formatMoney0(n / 100) : formatCents(n)
+}
+
 function payTextOf(totalCents, payMode) {
   if (payMode === 'p30') {
     const prepay = Math.round(totalCents * 0.3)
     const rest = totalCents - prepay
-    return `本产品订单总金额为${formatCents(totalCents)}元，甲方签订合同后10个工作日内向乙方支付30%预付款，即${formatCents(prepay)}元。乙方在收到预付款后20个自然日内完成生产，乙方生产完成后通知甲方，甲方收到通知后支付剩余尾款${formatCents(rest)}元。乙方应在甲方收货检验合格10个工作日内向甲方开具等额合法有效的13%增值税专用发票。`
+    return `本产品订单总金额为${docCents(totalCents)}元，甲方签订合同后10个工作日内向乙方支付30%预付款，即${docCents(prepay)}元。乙方在收到预付款后20个自然日内完成生产，乙方生产完成后通知甲方，甲方收到通知后支付剩余尾款${docCents(rest)}元。乙方应在甲方收货检验合格10个工作日内向甲方开具等额合法有效的13%增值税专用发票。`
   }
   if (payMode === 'p50') {
     const prepay = Math.round(totalCents * 0.5)
     const rest = totalCents - prepay
-    return `本产品订单总金额为${formatCents(totalCents)}元，甲方签订合同后10个工作日内向乙方支付50%预付款，即${formatCents(prepay)}元。乙方在收到预付款后20个自然日内完成生产，乙方生产完成后通知甲方，甲方收到通知后支付剩余尾款${formatCents(rest)}元。乙方应在甲方收货检验合格10个工作日内向甲方开具等额合法有效的13%增值税专用发票。`
+    return `本产品订单总金额为${docCents(totalCents)}元，甲方签订合同后10个工作日内向乙方支付50%预付款，即${docCents(prepay)}元。乙方在收到预付款后20个自然日内完成生产，乙方生产完成后通知甲方，甲方收到通知后支付剩余尾款${docCents(rest)}元。乙方应在甲方收货检验合格10个工作日内向甲方开具等额合法有效的13%增值税专用发票。`
   }
-  return `本产品订单总金额为${formatCents(totalCents)}元，签订本产品订购清单，并经甲乙双方确认当次甲方应付金额后，甲方应及时向乙方付款。乙方应在甲方支付全部款项后7个工作日内向甲方开具等额合法有效的13%增值税专用发票。`
+  return `本产品订单总金额为${docCents(totalCents)}元，签订本产品订购清单，并经甲乙双方确认当次甲方应付金额后，甲方应及时向乙方付款。乙方应在甲方支付全部款项后7个工作日内向甲方开具等额合法有效的13%增值税专用发票。`
 }
 
-function mainContractDateText(supplier) {
-  const md = String((supplier && supplier.main_contract_date) || '').slice(0, 10)
+function mainContractDateText(iso) {
+  const md = String(iso || '').slice(0, 10)
   if (!md) return '【      】年【     】月【     】日'
   const p = md.split('-').map(Number)
   return `【${p[0]}】年【${p[1]}】月【${p[2]}】日`
 }
 
-export async function buildOrderDocx({ supplier, items, payMode, totalCents }) {
+export async function buildOrderDocx({
+  supplier,
+  items,
+  payMode,
+  totalCents,
+  partyA,
+  mainContractDate,
+}) {
   const supplierName = (supplier && supplier.name) || '＿＿＿＿＿＿＿＿＿＿'
+  const partyAName = (partyA && partyA.name) || '＿＿＿＿＿＿＿＿＿＿'
   const b64List = await Promise.all(items.map((it) => (it.image ? loadImageB64(it.image) : null)))
   const doc = new DocxBuilder()
 
   doc.paras.push({ t: '产品订购清单', align: 'center', bold: true, size: 32, spaceAfter: 240 })
 
   const info = [
-    '购货单位（甲方）：广州兴趣岛信息科技有限公司',
+    `购货单位（甲方）：${partyAName}`,
     `供货单位（乙方）：${supplierName}`,
     '交货地址：广州市花都区花都沿江大道24号永日电梯（昊运仓储公司）张生 17675625750',
   ]
@@ -110,7 +124,7 @@ export async function buildOrderDocx({ supplier, items, payMode, totalCents }) {
     spaceAfter: 160,
   })
   doc.paras.push({
-    t: `甲乙双方已于${mainContractDateText(supplier)}签订了《购销框架合同》（以下简称“主合同”），现双方协商一致特签订本《产品订购清单》，乙方按以下表格内容及要求及时提供产品：`,
+    t: `甲乙双方已于${mainContractDateText(mainContractDate)}签订了《购销框架合同》（以下简称“主合同”），现双方协商一致特签订本《产品订购清单》，乙方按以下表格内容及要求及时提供产品：`,
     size: 21,
     line: 340,
     spaceAfter: 160,
@@ -141,8 +155,8 @@ export async function buildOrderDocx({ supplier, items, payMode, totalCents }) {
       imgCell,
       { text: it.spec || '', shade: GREEN },
       { text: it.qty || '', align: 'right', shade: GREEN },
-      { text: `${formatCents(inputToCents(it.unitPrice))} 元`, align: 'right', shade: GREEN },
-      { text: `${formatCents(itemLineCents(it))} 元`, align: 'right', shade: GREEN },
+      { text: `${docCents(inputToCents(it.unitPrice))} 元`, align: 'right', shade: GREEN },
+      { text: `${docCents(itemLineCents(it))} 元`, align: 'right', shade: GREEN },
       { text: (it.remark || '').trim(), shade: GREEN },
     ])
   })
@@ -150,7 +164,7 @@ export async function buildOrderDocx({ supplier, items, payMode, totalCents }) {
   doc.table.rows.push([
     { text: '合计（含税）', align: 'center', bold: true, gridSpan: 4, shade: GREEN },
     {
-      text: `¥${formatCents(totalCents)} 元，除前述费用外，甲方无需支付其他费用，乙方应按甲方的要求提供货物。`,
+      text: `¥${docCents(totalCents)} 元，除前述费用外，甲方无需支付其他费用，乙方应按甲方的要求提供货物。`,
       bold: true,
       gridSpan: 3,
       shade: GREEN,
@@ -169,7 +183,7 @@ export async function buildOrderDocx({ supplier, items, payMode, totalCents }) {
     { t: '4. 本《产品订购清单》自双方盖章之日起生效，一式贰份，双方各执壹份，具有同等法律效力。' },
     { t: '（此行以下无正文）', size: 18, color: '666666', spaceAfter: 280 },
     {
-      t: `甲方：广州兴趣岛信息科技有限公司　　　　乙方：${supplierName}`,
+      t: `甲方：${partyAName}　　　　乙方：${supplierName}`,
       spaceBefore: 200,
       spaceAfter: 240,
     },
@@ -178,7 +192,7 @@ export async function buildOrderDocx({ supplier, items, payMode, totalCents }) {
   ]
   after.forEach((p) => doc.paras2.push(Object.assign({ size: 21, line: 360 }, p)))
 
-  const mainDate = String((supplier && supplier.main_contract_date) || '').slice(0, 10)
+  const mainDate = String(mainContractDate || '').slice(0, 10)
   const tag = mainDate ? `_主合同${dateDigits(mainDate)}` : ''
   return {
     blob: doc.build(),
@@ -186,8 +200,9 @@ export async function buildOrderDocx({ supplier, items, payMode, totalCents }) {
   }
 }
 
-export function buildMainContractDocx(supplier, threshold = 70000) {
+export function buildMainContractDocx(supplier, threshold = 70000, partyA) {
   const supplierName = (supplier && supplier.name) || '＿＿＿＿＿＿＿＿＿＿'
+  const partyAName = (partyA && partyA.name) || '＿＿＿＿＿＿＿＿＿＿'
   const supplierTel = (supplier && supplier.phone) || '＿＿＿＿＿＿＿＿'
   const now = new Date()
   const dayText = `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日`
@@ -198,7 +213,7 @@ export function buildMainContractDocx(supplier, threshold = 70000) {
   const P = (t, o) => doc.paras.push(Object.assign({ t, size: 21, line: 340 }, o || {}))
 
   P('购销框架合同', { align: 'center', bold: true, size: 32, spaceAfter: 240, line: 300 })
-  P('甲方（购货方）：广州兴趣岛信息科技有限公司')
+  P('甲方（购货方）：' + partyAName)
   P('乙方（供货方）：' + supplierName)
   P(
     '根据《中华人民共和国民法典》及其有关法律法规，为明确甲乙双方的权利义务，甲、乙双方经友好协商，就乙方在合作期内为甲方供应产品，达成如下框架合同：',
@@ -284,7 +299,7 @@ export function buildMainContractDocx(supplier, threshold = 70000) {
   P('2、本合同自双方盖章之日起生效，一式贰份，甲乙双方各执壹份，具有同等法律效力。')
   P('3、本合同附件《产品订购清单》作为本合同的一部分，与本合同具有同等法律效力。', { spaceAfter: 320 })
 
-  P(`甲方（盖章）：广州兴趣岛信息科技有限公司　　　　乙方（盖章）：${supplierName}`)
+  P(`甲方（盖章）：${partyAName}　　　　乙方（盖章）：${supplierName}`)
   P('法定代表人（签字/盖章）：　　　　　　　　　　　法定代表人（签字/盖章）：')
   P(`乙方联系电话：${supplierTel}`)
   P(`签署日期：${dayText}　　　　　　　　　　签署日期：${dayText}`, { spaceBefore: 160 })

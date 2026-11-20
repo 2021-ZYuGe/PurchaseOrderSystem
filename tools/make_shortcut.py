@@ -4,7 +4,7 @@
 快捷方式放在程序根目录，目标为 runtime\\pythonw.exe -m app：
   - pythonw 不弹控制台
   - 写入相对路径，整个文件夹搬走后仍能启动
-  - 图标用根目录的 app.ico
+  - 图标用 assets/app.ico
 
 用法：
     python tools/make_shortcut.py
@@ -20,7 +20,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 TARGET = ROOT / 'runtime' / 'pythonw.exe'
 FALLBACK = ROOT / 'runtime' / 'python.exe'
-ICON = ROOT / 'app.ico'
+ICON = ROOT / 'assets' / 'app.ico'
 LNK = ROOT / '采购下单系统.lnk'
 ARGS = '-m app'
 DESC = '采购下单系统（关闭网页后自动退出）'
@@ -108,7 +108,7 @@ def build(root=ROOT):
         lnk.unlink()
 
     relpath = os.path.relpath(str(target), str(root))
-    icon = root / 'app.ico'
+    icon = root / 'assets' / 'app.ico'
     make_shortcut(lnk, target, ARGS, root,
                   icon if icon.is_file() else '', DESC, relpath)
     return lnk

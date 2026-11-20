@@ -8,20 +8,7 @@ import { generateContract, generateInfoSheet } from '../api/contracts'
 import { usePayThreshold } from '../composables/usePayThreshold'
 import { useToast } from '../composables/useToast'
 import { inputToCents, resolveOutputUrl, todayISO } from '../lib/format'
-
-const PARTY_A_CODES = {
-  广州兴趣岛信息科技有限公司: '91440104MA59C33C5N',
-  广州普惠优品电子商贸有限公司: '91440106MA7LKA4517',
-}
-const PARTY_A_NAMES = Object.keys(PARTY_A_CODES)
-const DEFAULT_PARTY_A = {
-  name: '广州兴趣岛信息科技有限公司',
-  credit_code: '91440104MA59C33C5N',
-  contact: '简丽冰',
-  tel: '15814464431',
-  email: '457263395@qq.com',
-  addr: '广州市天河区奥体南路9号兴创楼二楼203供应链组',
-}
+import { loadPartyA, pickPartyA, rememberPartyA, selectedPartyAName } from '../lib/party-a'
 const B_KEYS = [
   'name',
   'credit_code',
@@ -35,25 +22,13 @@ const B_KEYS = [
   'bank_open',
 ]
 
-function loadPartyA() {
-  const base = { ...DEFAULT_PARTY_A }
-  try {
-    const saved = JSON.parse(localStorage.getItem('partyA_v2') || '{}')
-    Object.keys(base).forEach((key) => {
-      if (String(saved[key] || '').trim()) base[key] = saved[key]
-    })
-  } catch (e) {
-    /* 忽略 */
-  }
-  return base
-}
-
 const { threshold, setThreshold } = usePayThreshold()
 const { success: toastSuccess } = useToast()
 const route = useRoute()
 
 const mode = ref('')
 const type = ref('batch')
+const partyAList = ref([])
 const archive = ref([])
 const selectedArchive = ref(null)
 const archiveLoading = ref(false)
@@ -66,7 +41,7 @@ const contractResult = ref(null)
 const infoResult = ref(null)
 
 const form = reactive({
-  party_a: loadPartyA(),
+  party_a: { name: '', credit_code: '', contact: '', tel: '', email: '', addr: '' },
   party_b: {
     name: '',
     credit_code: '',
@@ -93,7 +68,7 @@ const form = reactive({
     pay_mode: 'full',
   },
 })
-if (PARTY_A_CODES[form.party_a.name]) form.party_a.credit_code = PARTY_A_CODES[form.party_a.name]
+
 
 const isDropship = computed(() => type.value === 'dropship')
 const isSimple = computed(() => type.value === 'simple')
@@ -157,6 +132,23 @@ function getValue(path) {
   return String(
     path.split('.').reduce((target, key) => (target ? target[key] : ''), form) ?? '',
   ).trim()
+}
+
+function applyPartyA(name) {
+  const party = pickPartyA(partyAList.value, name)
+  if (!party) return
+  ;['name', 'credit_code', 'contact', 'tel', 'email', 'addr'].forEach((key) => {
+    form.party_a[key] = party[key] || ''
+  })
+}
+
+async function loadPartyOptions() {
+  try {
+    partyAList.value = await loadPartyA()
+    applyPartyA(String(route.query.party || '') || selectedPartyAName())
+  } catch (e) {
+    formError.value = '甲方信息读取失败：' + (e && e.message ? e.message : e)
+  }
 }
 
 async function loadArchive() {
@@ -375,7 +367,8 @@ async function saveOnly() {
 watch(
   () => form.party_a.name,
   (name) => {
-    if (PARTY_A_CODES[name]) form.party_a.credit_code = PARTY_A_CODES[name]
+    applyPartyA(name)
+    rememberPartyA(name)
   },
 )
 
@@ -384,18 +377,6 @@ watch(
   (name) => {
     if (!form.party_b.bank_name.trim()) form.party_b.bank_name = String(name || '').trim()
   },
-)
-
-watch(
-  () => form.party_a,
-  (value) => {
-    try {
-      localStorage.setItem('partyA_v2', JSON.stringify(value))
-    } catch (e) {
-      /* 忽略 */
-    }
-  },
-  { deep: true },
 )
 
 async function applyRenewQuery() {
@@ -416,6 +397,7 @@ async function applyRenewQuery() {
 }
 
 onMounted(async () => {
+  await loadPartyOptions()
   if (String(route.query.mode || '') === 'renew') {
     await applyRenewQuery()
   } else {
@@ -576,7 +558,9 @@ onMounted(async () => {
         <div class="field full">
           <label class="field-label">公司名称</label>
           <select v-model="form.party_a.name">
-            <option v-for="name in PARTY_A_NAMES" :key="name" :value="name">{{ name }}</option>
+            <option v-for="party in partyAList" :key="party.name" :value="party.name">
+              {{ party.name }}
+            </option>
           </select>
         </div>
         <div class="field">

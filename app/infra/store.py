@@ -23,11 +23,12 @@ if __package__ in (None, ''):                 # 允许直接 python app/infra/st
 from app.config import (BACKUP_DIR, DATA_DIR, DATA_JS, DB_PATH,
                         SCHEMA_VERSION as CONFIG_SCHEMA_VERSION,
                         ROOT_PATH as ROOT)
+from app.domain.names import name_key
 
 from app.infra.schema import (  # noqa: E402
     MIGRATIONS, SCHEMA, _applied_migrations, _apply_migrations,
-    _ensure_columns, _m3_drop_legacy, _meta, _pending_migrations,
-    _set_meta, _table_exists, init_schema,
+    _ensure_columns, _m3_drop_legacy, _merge_supplier_rows, _meta,
+    _pending_migrations, _set_meta, _table_exists, init_schema,
 )
 
 SCHEMA_VERSION = str(CONFIG_SCHEMA_VERSION)
@@ -167,11 +168,12 @@ def _insert_catalog(conn, products, suppliers):
     relation_names = {}
 
     for s in suppliers:
+        name = str(s.get("供应商名称") or "")
         cur = conn.execute(
-            "INSERT INTO suppliers(code, name, phone, main_contract_date, contract_count) "
-            "VALUES(?, ?, ?, ?, ?)",
+            "INSERT INTO suppliers(code, name, name_key, phone, main_contract_date, "
+            "contract_count) VALUES(?, ?, ?, ?, ?, ?)",
             (
-                str(s.get("id") or ""), str(s.get("供应商名称") or ""),
+                str(s.get("id") or ""), name, name_key(name),
                 str(s.get("电话") or ""), str(s.get("主合同日期") or ""),
                 int(s.get("历史合同份数") or 0),
             ),
@@ -232,46 +234,60 @@ def _insert_catalog(conn, products, suppliers):
     _set_meta(conn, "catalog_updated_at", time.strftime("%Y-%m-%d %H:%M:%S"))
 
 
-def _upsert_contract_records(conn, records):
-    """把增量批次里的合同级记录写进台账（按 文件名 + 供应商 去重）。
+def _upsert_contract_records(conn, records, supplier_names=None):
+    """把增量批次里的合同级记录写进台账（按 文件名 + 供应商归一键 去重）。
 
     只写合同级信息，不动产品与供应商目录；与目录在同一个事务里提交，
     所以“产品已合并但合同日期没更新”的情况不会出现。
     """
+    supplier_names = supplier_names or {}
     added = 0
     for record in records:
         filename = str(record.get("文件名") or "").strip()
         supplier = str(record.get("供应商") or "").strip()
         if not filename:
             continue
+        supplier = supplier_names.get(name_key(supplier), supplier)
+        party = str(record.get("甲方") or "").strip()
+        party_source = str(record.get("甲方来源") or "").strip() or ("content" if party else "")
+        source_path = str(record.get("来源文件") or "").strip()
         no = str(record.get("合同号") or "").strip()
         main = str(record.get("主合同日期") or "").strip()
         term_start = _iso_or_blank(record.get("合同起始"))
         term_end = _iso_or_blank(record.get("合同截止"))
         signs = [str(x).strip() for x in _as_list(record.get("签署日期")) if str(x).strip()]
-        row = conn.execute(
-            "SELECT id FROM contracts WHERE filename=? AND supplier_name=? ORDER BY id LIMIT 1",
-            (filename, supplier),
-        ).fetchone()
+        rows = conn.execute(
+            "SELECT id, supplier_name FROM contracts WHERE filename=? ORDER BY id",
+            (filename,),
+        ).fetchall()
+        row = next((item for item in rows
+                    if name_key(item["supplier_name"]) == name_key(supplier)), None)
         if row is None:
             cur = conn.execute(
                 "INSERT INTO contracts(source_order, contract_no, filename, supplier_name, "
-                "main_contract_date, has_order_sheet, order_sheet_start_paragraph, "
-                "contract_start_date, contract_end_date) "
-                "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (0, no, filename, supplier, main or None, 0, None, term_start, term_end),
+                "party_a, party_a_source, source_path, main_contract_date, has_order_sheet, "
+                "order_sheet_start_paragraph, contract_start_date, contract_end_date) "
+                "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (0, no, filename, supplier, party, party_source, source_path,
+                 main or None, 0, None, term_start, term_end),
             )
             cid = cur.lastrowid
             added += 1
         else:
             cid = row["id"]
-            # 期限只有解析到才覆盖：老模板没有这条，不能把已登记的日期清空
+            # 期限、甲方只有解析到才覆盖：不能把已登记/手工修正的内容清空
             conn.execute(
-                "UPDATE contracts SET contract_no=?, main_contract_date=?, "
+                "UPDATE contracts SET contract_no=?, supplier_name=?, "
+                "party_a=CASE WHEN ?<>'' THEN ? ELSE party_a END, "
+                "party_a_source=CASE WHEN ?<>'' THEN ? ELSE party_a_source END, "
+                "source_path=CASE WHEN ?<>'' THEN ? ELSE source_path END, "
+                "main_contract_date=?, "
                 "contract_start_date=CASE WHEN ?<>'' THEN ? ELSE contract_start_date END, "
                 "contract_end_date=CASE WHEN ?<>'' THEN ? ELSE contract_end_date END "
                 "WHERE id=?",
-                (no or None, main or None, term_start, term_start, term_end, term_end, cid),
+                (no or None, supplier,
+                 party, party, party_source, party_source, source_path, source_path,
+                 main or None, term_start, term_start, term_end, term_end, cid),
             )
         conn.execute("DELETE FROM contract_sign_dates WHERE contract_id=?", (cid,))
         for pos, value in enumerate(signs):
@@ -301,7 +317,9 @@ def replace_catalog(products, suppliers, backup=True, imported_index=None,
                     raise RuntimeError("合同收录索引已被另一项更新操作修改，本次已安全中止，请重新运行合并。")
             _insert_catalog(conn, products, suppliers)
             if contracts:
-                _upsert_contract_records(conn, contracts)
+                canonical = {name_key(s.get("供应商名称", "")): s.get("供应商名称", "")
+                             for s in suppliers}
+                _upsert_contract_records(conn, contracts, canonical)
             if imported_index is not None:
                 _write_imported_index(conn, imported_index)
     clear_pending_cache()
@@ -431,16 +449,33 @@ def _empty_contract_stat():
     }
 
 
-def supplier_contract_stats():
-    """按供应商汇总合同台账，供网页展示“最近签约”和“合同到期”。
+def _merge_contract_stat(target, source):
+    """把一家甲方的统计并进供应商级统计（兼容旧调用）。"""
+    target["份数"] += source["份数"]
+    if source["主合同日期"] > target["主合同日期"]:
+        target["主合同日期"] = source["主合同日期"]
+    if source["合同截止日期"] > target["合同截止日期"]:
+        for key in ("合同截止日期", "合同起始日期", "到期合同号",
+                    "到期合同文件", "期限来源", "期限备注"):
+            target[key] = source[key]
+    if (source["最近签约日期"], source["最近落款日期"], source["最近合同号"]) > (
+            target["最近签约日期"], target["最近落款日期"], target["最近合同号"]):
+        for key in ("最近签约日期", "最近合同号", "最近合同文件",
+                    "最近落款日期", "最近主合同日期"):
+            target[key] = source[key]
+    if source["期限待确认"]:
+        target["期限待确认"] = True
+
+
+def supplier_contract_stats_by_party():
+    """按“供应商 + 甲方”汇总合同台账。
 
     业务口径：日期以合同正文“甲乙双方已于…年…月…日签订了《购销框架合同》”
     这句为准，不取文末落款日期。同一日期下优先保留落款更晚、
     单号更大的那份合同，方便追溯是哪一单。
 
-    合同期限（“自…起至…止”）同理：取这家供应商所有合同里止日最晚的一份，
-    代表当前覆盖最远的框架合同；如果更新的合同没写期限，标记“期限待确认”，
-    避免把已经续签的供应商误报成过期。
+    合同期限（“自…起至…止”）只在同一甲方内取止日最晚的一份；
+    如果更新的合同没写期限，标记“期限待确认”，避免误报过期。
     """
     if not DB_PATH.exists():
         return {}
@@ -448,25 +483,27 @@ def supplier_contract_stats():
         sign = {
             row["contract_id"]: row["d"]
             for row in conn.execute(
-                "SELECT contract_id, MAX(sign_date) AS d FROM contract_sign_dates GROUP BY contract_id"
+                "SELECT contract_id, MAX(sign_date) AS d "
+                "FROM contract_sign_dates GROUP BY contract_id"
             )
         }
         manual_terms = {
-            row["supplier_name"]: row
-            for row in conn.execute("SELECT * FROM supplier_contract_terms")
+            (row["supplier_name"], row["party_a"]): row
+            for row in conn.execute("SELECT * FROM supplier_party_terms")
         }
         stats = {}
-        # 手工登记过的供应商，即使台账里一份合同都没有，也要参与到期预警
-        for name in manual_terms:
-            if name and name not in stats:
-                stats[name] = _empty_contract_stat()
+        # 手工登记过的组合，即使台账里一份合同都没有，也要参与到期预警
+        for key in manual_terms:
+            if key[0]:
+                stats[key] = _empty_contract_stat()
         for row in conn.execute("SELECT * FROM contracts"):
             name = (row["supplier_name"] or "").strip()
             if not name:
                 continue
-            item = stats.get(name)
+            key = (name, (row["party_a"] or "").strip())
+            item = stats.get(key)
             if item is None:
-                item = stats[name] = _empty_contract_stat()
+                item = stats[key] = _empty_contract_stat()
             item["份数"] += 1
             main = (row["main_contract_date"] or "").strip()
             signed = (sign.get(row["id"]) or "").strip()
@@ -497,9 +534,9 @@ def supplier_contract_stats():
                 item["最近落款日期"] = signed
                 item["最近主合同日期"] = main
 
-        for name, item in stats.items():
+        for key, item in stats.items():
             # 手工登记只在比合同正文更晚时生效：续签后自动值应自动顶上来
-            manual = manual_terms.get(name)
+            manual = manual_terms.get(key)
             if manual is not None:
                 m_end = (manual["end_date"] or "").strip()
                 if m_end and m_end >= item["合同截止日期"]:
@@ -511,19 +548,31 @@ def supplier_contract_stats():
                         item["期限来源"] = "manual"
                 if item["期限来源"] == "manual":
                     item["期限备注"] = (manual["note"] or "").strip()
-            # 最近一份合同比“带期限的那份”更新，且自身没写期限 → 提示确认，而不是直接判过期
+            # 最近一份合同比“带期限的那份”更新，且自身没写期限 → 提示确认
             latest = item["最近签约日期"]
             base = item["_有期限签约日"] or item["合同截止日期"]
             if item["合同截止日期"] and latest and latest > base:
                 newer_row = conn.execute(
                     "SELECT contract_end_date FROM contracts WHERE supplier_name=? "
-                    "AND main_contract_date=? ORDER BY id DESC LIMIT 1",
-                    (name, latest),
+                    "AND party_a=? AND main_contract_date=? ORDER BY id DESC LIMIT 1",
+                    (key[0], key[1], latest),
                 ).fetchone()
                 if newer_row is not None and not (newer_row["contract_end_date"] or "").strip():
                     item["期限待确认"] = True
             item.pop("_有期限签约日", None)
         return stats
+
+
+def supplier_contract_stats():
+    """按供应商汇总（兼容旧调用）：把各甲方的统计合并成一行。"""
+    stats = {}
+    for (name, _party), item in supplier_contract_stats_by_party().items():
+        target = stats.get(name)
+        if target is None:
+            stats[name] = dict(item)
+        else:
+            _merge_contract_stat(target, item)
+    return stats
 
 
 EXPIRY_BUCKETS = [
@@ -560,8 +609,9 @@ def expiry_bucket(days):
 
 
 def contract_expiry_overview(today=None):
-    """合同到期预警：按供应商给出到期日、剩余天数和预警档位。
+    """合同到期预警：按“供应商 + 甲方”给出到期日、剩余天数和预警档位。
 
+    同一供应商只有一家甲方时仍只出一行；两家都有时各出一行。
     数据全部来自 SQLite（合同台账解析出的期限 + 手工登记），
     每次请求现算天数，所以页面放一天再打开也是准的。
     """
@@ -570,7 +620,7 @@ def contract_expiry_overview(today=None):
     elif isinstance(today, str):
         today = date.fromisoformat(today[:10])
 
-    stats = supplier_contract_stats()
+    stats = supplier_contract_stats_by_party()
     if not DB_PATH.exists():
         return {"today": today.isoformat(), "total": 0, "counts": {},
                 "buckets": [{"key": k, "label": v, "count": 0} for k, v in EXPIRY_BUCKETS],
@@ -578,39 +628,46 @@ def contract_expiry_overview(today=None):
     with session() as conn:
         names = [row["name"] for row in conn.execute("SELECT name FROM suppliers ORDER BY name")]
         # 手工登记过、但目录里还没有的供应商也要列出来
-        for row in conn.execute("SELECT supplier_name FROM supplier_contract_terms ORDER BY supplier_name"):
+        for row in conn.execute(
+                "SELECT DISTINCT supplier_name FROM supplier_party_terms ORDER BY supplier_name"):
             if row["supplier_name"] and row["supplier_name"] not in names:
                 names.append(row["supplier_name"])
 
     items = []
     for name in names:
-        st = stats.get(name) or {}
-        end = (st.get("合同截止日期") or "").strip()
-        days = None
-        if end:
-            try:
-                days = (date.fromisoformat(end) - today).days
-            except ValueError:
-                days = None
-        bucket = expiry_bucket(days)
-        # 已经续签但新合同没写期限的，不直接判过期，挪到「待确认」提醒人工核对
-        if bucket == "expired" and st.get("期限待确认"):
-            bucket = "pending"
-        items.append({
-            "供应商": name,
-            "到期日": end,
-            "起始日": st.get("合同起始日期", ""),
-            "剩余天数": days,
-            "档位": bucket,
-            "档位名": EXPIRY_LABELS.get(bucket, ""),
-            "合同号": st.get("到期合同号", ""),
-            "合同文件": st.get("到期合同文件", ""),
-            "来源": st.get("期限来源", ""),
-            "备注": st.get("期限备注", ""),
-            "待确认": bool(st.get("期限待确认")),
-            "最近签约": st.get("最近签约日期", ""),
-            "合同份数": st.get("份数", 0),
-        })
+        rows = [(party, item) for (supplier, party), item in stats.items()
+                if supplier == name]
+        if not rows:
+            rows = [("", {})]
+        for party, st in sorted(rows, key=lambda row: (row[0] == "", row[0])):
+            end = (st.get("合同截止日期") or "").strip()
+            days = None
+            if end:
+                try:
+                    days = (date.fromisoformat(end) - today).days
+                except ValueError:
+                    days = None
+            bucket = expiry_bucket(days)
+            # 已经续签但新合同没写期限的，不直接判过期，挪到「待确认」提醒人工核对
+            if bucket == "expired" and st.get("期限待确认"):
+                bucket = "pending"
+            items.append({
+                "供应商": name,
+                "甲方": party,
+                "甲方名": party or "未确认甲方",
+                "到期日": end,
+                "起始日": st.get("合同起始日期", ""),
+                "剩余天数": days,
+                "档位": bucket,
+                "档位名": EXPIRY_LABELS.get(bucket, ""),
+                "合同号": st.get("到期合同号", ""),
+                "合同文件": st.get("到期合同文件", ""),
+                "来源": st.get("期限来源", ""),
+                "备注": st.get("期限备注", ""),
+                "待确认": bool(st.get("期限待确认")),
+                "最近签约": st.get("最近签约日期", ""),
+                "合同份数": st.get("份数", 0),
+            })
 
     order = {key: i for i, (key, _label) in enumerate(EXPIRY_BUCKETS)}
 
@@ -621,10 +678,11 @@ def contract_expiry_overview(today=None):
             days = -days
         # 未登记里，有框架合同的（需要补期限）排在纯月结供应商前面
         if x["档位"] == "unknown":
-            return (order.get("unknown", 99), 0 if x["合同份数"] else 1, x["供应商"])
+            return (order.get("unknown", 99), 0 if x["合同份数"] else 1,
+                    x["供应商"], x["甲方名"])
         return (order.get(x["档位"], 99),
                 days if days is not None else 99999,
-                x["供应商"])
+                x["供应商"], x["甲方名"])
 
     items.sort(key=sort_key)
     counts = {}
@@ -641,11 +699,12 @@ def contract_expiry_overview(today=None):
     }
 
 
-def save_contract_term(supplier_name, start_date="", end_date="", note=""):
-    """手工登记/修正某家供应商的合同期限。"""
+def save_contract_term(supplier_name, start_date="", end_date="", note="", party_a=""):
+    """手工登记/修正某家供应商在某家甲方下的合同期限。"""
     name = str(supplier_name or "").strip()
     if not name:
         raise ValueError("缺少供应商名称")
+    party = str(party_a or "").strip()
     start = _iso_or_blank(start_date)
     end = _iso_or_blank(end_date)
     if start_date and not start:
@@ -661,13 +720,16 @@ def save_contract_term(supplier_name, start_date="", end_date="", note=""):
             init_schema(conn)
         with session(write=True) as conn:
             conn.execute(
-                "INSERT INTO supplier_contract_terms(supplier_name, start_date, end_date, note, updated_at) "
-                "VALUES(?, ?, ?, ?, ?) "
-                "ON CONFLICT(supplier_name) DO UPDATE SET start_date=excluded.start_date, "
-                "end_date=excluded.end_date, note=excluded.note, updated_at=excluded.updated_at",
-                (name, start, end, str(note or "").strip(), time.strftime("%Y-%m-%d %H:%M:%S")),
+                "INSERT INTO supplier_party_terms"
+                "(supplier_name, party_a, start_date, end_date, note, updated_at) "
+                "VALUES(?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(supplier_name, party_a) DO UPDATE SET "
+                "start_date=excluded.start_date, end_date=excluded.end_date, "
+                "note=excluded.note, updated_at=excluded.updated_at",
+                (name, party, start, end, str(note or "").strip(),
+                 time.strftime("%Y-%m-%d %H:%M:%S")),
             )
-    return {"供应商": name, "起始日": start, "到期日": end}
+    return {"供应商": name, "甲方": party, "起始日": start, "到期日": end}
 
 
 def set_contract_terms(records):
@@ -685,15 +747,19 @@ def set_contract_terms(records):
     return len(rows)
 
 
-def delete_contract_term(supplier_name):
-    """撤销手工登记，回到按合同正文自动识别。"""
+def delete_contract_term(supplier_name, party_a=""):
+    """撤销某家甲方下的手工登记，回到按合同正文自动识别。"""
     name = str(supplier_name or "").strip()
     if not name:
         raise ValueError("缺少供应商名称")
+    party = str(party_a or "").strip()
     with WRITE_LOCK, interprocess_lock(DB_PATH.with_name(DB_PATH.name + ".init.lock")):
         with session(write=True) as conn:
-            conn.execute("DELETE FROM supplier_contract_terms WHERE supplier_name=?", (name,))
-    return {"供应商": name}
+            conn.execute(
+                "DELETE FROM supplier_party_terms WHERE supplier_name=? AND party_a=?",
+                (name, party),
+            )
+    return {"供应商": name, "甲方": party}
 
 
 def data_freshness():
@@ -960,6 +1026,131 @@ def get_supplier_archive():
     }
 
 
+def list_party_a():
+    """甲方主体目录（后端唯一来源）。"""
+    if not DB_PATH.exists():
+        return []
+    with session() as conn:
+        rows = conn.execute(
+            "SELECT name, payload FROM party_a_profiles ORDER BY name").fetchall()
+    result = []
+    for row in rows:
+        try:
+            item = json.loads(row["payload"])
+        except (TypeError, ValueError):
+            item = {}
+        item["name"] = item.get("name") or row["name"]
+        result.append(item)
+    return result
+
+
+def save_party_a(name, payload):
+    name = str(name or "").strip()
+    if not name:
+        raise ValueError("缺少甲方名称")
+    data = dict(payload or {})
+    data["name"] = name
+    with session(write=True) as conn:
+        conn.execute(
+            "INSERT INTO party_a_profiles(name, payload) VALUES(?, ?) "
+            "ON CONFLICT(name) DO UPDATE SET payload=excluded.payload",
+            (name, json.dumps(data, ensure_ascii=False)),
+        )
+    return data
+
+
+def supplier_duplicate_candidates():
+    """短名/错别字候选；同一来源只保留最像的全称，只给人工确认。"""
+    if not DB_PATH.exists():
+        return []
+    with session() as conn:
+        rows = conn.execute(
+            "SELECT s.id, s.name, s.contract_count, "
+            "(SELECT COUNT(*) FROM supplier_products sp WHERE sp.supplier_id=s.id) AS products "
+            "FROM suppliers s ORDER BY s.name").fetchall()
+    items = [{
+        "name": row["name"],
+        "contracts": int(row["contract_count"] or 0),
+        "products": int(row["products"] or 0),
+    } for row in rows]
+
+    def similar(first_key, second_key):
+        if first_key.startswith(second_key) or second_key.startswith(first_key):
+            return True
+        # 错别字：等长、至少 8 字、只差一个字（如 玩县 / 玩具）
+        if len(first_key) != len(second_key) or len(first_key) < 8:
+            return False
+        return sum(1 for a, b in zip(first_key, second_key) if a != b) <= 1
+
+    best = {}
+    for index, first in enumerate(items):
+        first_key = name_key(first["name"])
+        for second in items[index + 1:]:
+            second_key = name_key(second["name"])
+            if not first_key or not second_key or first_key == second_key:
+                continue
+            if not similar(first_key, second_key):
+                continue
+            short, long = (first, second) if len(first_key) < len(second_key) else (second, first)
+            # 同长度时，合同多的那条当保留名
+            if len(first_key) == len(second_key):
+                short, long = (first, second) if first["contracts"] <= second["contracts"] else (second, first)
+            current = best.get(short["name"])
+            rank = (long["contracts"], len(long["name"]))
+            if current is None or rank > current[0]:
+                best[short["name"]] = (rank, long)
+    return [{"source": next(item for item in items if item["name"] == source),
+             "target": target[1]}
+            for source, target in sorted(best.items())]
+
+
+def merge_suppliers(source_name, target_name):
+    """把 source 合并进 target；合并前备份，合并记录写日志。"""
+    source_key = name_key(source_name)
+    target_key = name_key(target_name)
+    if not source_key or not target_key or source_key == target_key:
+        raise ValueError("请选择两个不同的供应商")
+    if DB_PATH.exists():
+        backup_database("before_supplier_merge")
+    with WRITE_LOCK, interprocess_lock(DB_PATH.with_name(DB_PATH.name + ".init.lock")):
+        with session() as conn:
+            init_schema(conn)
+        with session(write=True) as conn:
+            source = conn.execute(
+                "SELECT * FROM suppliers WHERE name_key=? ORDER BY id LIMIT 1",
+                (source_key,)).fetchone()
+            target = conn.execute(
+                "SELECT * FROM suppliers WHERE name_key=? ORDER BY id LIMIT 1",
+                (target_key,)).fetchone()
+            if source is None or target is None:
+                raise ValueError("供应商不存在或已被合并")
+            products = conn.execute(
+                "SELECT COUNT(*) FROM supplier_products WHERE supplier_id=?",
+                (source["id"],)).fetchone()[0]
+            contracts = conn.execute(
+                "SELECT COUNT(*) FROM contracts WHERE supplier_name=?",
+                (source["name"],)).fetchone()[0]
+            profiles = conn.execute(
+                "SELECT COUNT(*) FROM supplier_profiles WHERE name_key=?",
+                (source_key,)).fetchone()[0]
+            _merge_supplier_rows(conn, target, source)
+            conn.execute(
+                "UPDATE suppliers SET contract_count=?, main_contract_date=? WHERE id=?",
+                (int(target["contract_count"] or 0) + int(source["contract_count"] or 0),
+                 max(target["main_contract_date"] or "", source["main_contract_date"] or ""),
+                 target["id"]),
+            )
+            conn.execute(
+                "INSERT INTO supplier_merge_log"
+                "(source_name, target_name, products, contracts, profiles, created_at) "
+                "VALUES(?, ?, ?, ?, ?, ?)",
+                (source["name"], target["name"], products, contracts, profiles,
+                 time.strftime("%Y-%m-%d %H:%M:%S")),
+            )
+    return {"source": source["name"], "target": target["name"],
+            "products": products, "contracts": contracts, "profiles": profiles}
+
+
 def save_supplier_profile(info):
     name = str(info.get("name") or "").strip()
     if not name:
@@ -970,19 +1161,21 @@ def save_supplier_profile(info):
             continue
         values[PROFILE_COLUMNS.get(key, key)] = str(value).strip()
     values["最近签署日期"] = time.strftime("%Y-%m-%d")
+    key = name_key(name)
     with session(write=True) as conn:
         row = conn.execute(
-            "SELECT id FROM supplier_profiles WHERE name=? ORDER BY id LIMIT 1", (name,)
+            "SELECT id FROM supplier_profiles WHERE name_key=? OR name=? ORDER BY id LIMIT 1",
+            (key, name),
         ).fetchone()
         if row is None:
-            columns = [PROFILE_FIELDS[k] for k in values if k in PROFILE_FIELDS]
-            params = [values[k] for k in values if k in PROFILE_FIELDS]
+            columns = ["name_key"] + [PROFILE_FIELDS[k] for k in values if k in PROFILE_FIELDS]
+            params = [key] + [values[k] for k in values if k in PROFILE_FIELDS]
             conn.execute(
                 "INSERT INTO supplier_profiles(%s) VALUES(%s)" %
                 (",".join(columns), ",".join("?" for _ in columns)), params,
             )
         else:
-            assignments, params = [], []
+            assignments, params = ["name=?", "name_key=?"], [name, key]
             for cn, value in values.items():
                 col = PROFILE_FIELDS.get(cn)
                 if col and col != "name":
@@ -1002,11 +1195,13 @@ def merge_supplier_profiles(records, party_a=None):
             name = str(record.get("名称") or "").strip()
             if not name:
                 continue
+            key = name_key(name)
             row = conn.execute(
-                "SELECT * FROM supplier_profiles WHERE name=? ORDER BY id LIMIT 1", (name,)
+                "SELECT * FROM supplier_profiles WHERE name_key=? OR name=? ORDER BY id LIMIT 1",
+                (key, name),
             ).fetchone()
             if row is None:
-                columns, params = ["name"], [name]
+                columns, params = ["name", "name_key"], [name, key]
                 for cn, col in PROFILE_FIELDS.items():
                     if cn == "名称":
                         continue
@@ -1047,9 +1242,9 @@ def merge_supplier_profiles(records, party_a=None):
                 )
                 updated += 1
         for name, payload in (party_a or {}).items():
+            # 后端播种的甲方信息优先，旧档案只补空缺
             conn.execute(
-                "INSERT INTO party_a_profiles(name, payload) VALUES(?, ?) "
-                "ON CONFLICT(name) DO UPDATE SET payload=excluded.payload",
+                "INSERT OR IGNORE INTO party_a_profiles(name, payload) VALUES(?, ?)",
                 (name, json.dumps(payload, ensure_ascii=False)),
             )
     return added, updated
@@ -1109,13 +1304,17 @@ def ensure_database():
     with WRITE_LOCK, interprocess_lock(DB_PATH.with_name(DB_PATH.name + ".init.lock")):
         with session() as conn:
             conn.execute("PRAGMA journal_mode = WAL")
-            init_schema(conn)
             pending = _pending_migrations(conn)
-        # 有结构迁移时先整库备份，再动表
+        # 先备份再做任何结构写入：init_schema 会补列、改版本号
         if pending and existed:
             backup_database("before_migration_v%d" % pending[0][0])
+        with session() as conn:
+            init_schema(conn)
         with session(write=True) as conn:
             _apply_migrations(conn)
+            # v4 之后仍可能有外部带入的重复名称：每次启动再归一并精确合并
+            from app.infra.schema import repair_supplier_names
+            repair_supplier_names(conn)
     return str(DB_PATH)
 
 
@@ -1160,8 +1359,8 @@ def verify_database():
 # ---------------- 只读查询：前端按需取数（P2 起 data.js 退场） ----------------
 
 def _norm_text(value):
-    """与前端 norm() 一致：转小写、去掉所有空白"""
-    return re.sub(r"\s+", "", str(value or "")).lower()
+    """与名称归一同口径：全角转半角、去空白、转小写"""
+    return name_key(value)
 
 
 def _product_hit(product, q, raw_len):
@@ -1193,10 +1392,11 @@ def catalog_meta():
 
 
 def list_suppliers_light():
-    """供应商下拉用的轻量列表：只有名字、电话、最近签约和产品 keys"""
+    """供应商下拉用的轻量列表：名字、电话、按甲方分组的合同摘要、产品 keys"""
     if not DB_PATH.exists():
         return []
-    stats = supplier_contract_stats()
+    stats = supplier_contract_stats_by_party()
+    today = date.today()
     with session() as conn:
         rows = conn.execute(
             "SELECT id, code, name, phone, main_contract_date, contract_count FROM suppliers "
@@ -1206,20 +1406,46 @@ def list_suppliers_light():
                 "SELECT sp.supplier_id, p.code FROM supplier_products sp "
                 "JOIN products p ON p.id = sp.product_id ORDER BY p.code"):
             relations.setdefault(row["supplier_id"], []).append(row["code"])
+
+    parties = {}
+    for (name, party), st in stats.items():
+        end = (st.get("合同截止日期") or "").strip()
+        days = None
+        if end:
+            try:
+                days = (date.fromisoformat(end) - today).days
+            except ValueError:
+                days = None
+        parties.setdefault(name, []).append({
+            "甲方": party,
+            "甲方名": party or "未确认甲方",
+            "最近签约": st.get("最近签约日期", ""),
+            "最近合同号": st.get("最近合同号", ""),
+            "合同起始": st.get("合同起始日期", ""),
+            "合同截止": end,
+            "剩余天数": days,
+            "档位": expiry_bucket(days),
+            "待确认": bool(st.get("期限待确认")),
+            "份数": int(st.get("份数") or 0),
+        })
+
     result = []
     for row in rows:
-        st = stats.get(row["name"]) or {}
-        latest = max(st.get("最近签约日期") or "", row["main_contract_date"] or "")
+        items = sorted(parties.get(row["name"], []), key=lambda x: (x["甲方"] == "", x["甲方"]))
+        latest = max([row["main_contract_date"] or ""]
+                     + [item["最近签约"] for item in items])
+        newest = max(items, key=lambda x: (x["最近签约"], x["最近合同号"]), default={})
         result.append({
             "id": row["code"],
             "供应商名称": row["name"],
             "电话": row["phone"],
             "最近签约日期": latest,
             "主合同日期": latest,
-            "最近合同号": st.get("最近合同号", ""),
-            "合同记录数": int(st.get("份数") or 0),
+            "最近合同号": newest.get("最近合同号", ""),
+            "合同记录数": sum(item["份数"] for item in items),
             "历史合同份数": int(row["contract_count"] or 0),
             "产品keys": relations.get(row["id"], []),
+            "parties": items,
         })
     return result
 
@@ -1270,10 +1496,10 @@ def search_products(query, supplier_code=None, limit=20):
 def search_suppliers(query):
     """供应商下拉的本地过滤；不传关键字时返回全部（轻量字段）"""
     items = list_suppliers_light()
-    q = _norm_text(query)
+    q = name_key(query)
     if not q:
         return items
-    return [s for s in items if q in _norm_text(s["供应商名称"])]
+    return [s for s in items if q in name_key(s["供应商名称"])]
 
 
 def search_contracts(query, limit=50):
@@ -1303,6 +1529,7 @@ def search_contracts(query, limit=50):
         rows = conn.execute(sql, params).fetchall()
     return [{
         "供应商": row["supplier_name"] or "",
+        "甲方": row["party_a"] or "",
         "合同号": row["contract_no"] or "",
         "文件名": row["filename"] or "",
         "签署日期": row["last_sign"] or "",

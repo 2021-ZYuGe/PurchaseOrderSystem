@@ -8,6 +8,14 @@ export function fetchContractStatus() {
   return getJSON('/api/contracts/status')
 }
 
+export function fetchSyncStatus() {
+  return getJSON('/api/contracts/sync')
+}
+
+export function startSync() {
+  return postJSON('/api/contracts/sync', {})
+}
+
 export function searchContracts(q, limit = 50) {
   return getJSON('/api/contracts/search', { query: { q, limit } })
 }
@@ -20,10 +28,10 @@ export function generateInfoSheet(partyB) {
   return postJSON('/api/contracts/info-sheet', { party_b: partyB }, { timeout: 120000 })
 }
 
-export function saveTerm({ supplier, start_date, end_date, note = '' }) {
-  return postJSON('/api/contracts/terms', { supplier, start_date, end_date, note })
+export function saveTerm({ supplier, party_a = '', start_date, end_date, note = '' }) {
+  return postJSON('/api/contracts/terms', { supplier, party_a, start_date, end_date, note })
 }
 
-export function removeTerm(supplier) {
-  return deleteJSON('/api/contracts/terms', { query: { supplier } })
+export function removeTerm(supplier, party_a = '') {
+  return deleteJSON('/api/contracts/terms', { query: { supplier, party_a } })
 }

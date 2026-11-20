@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import ContractStatusCard from '../components/ContractStatusCard.vue'
 import {
   BACKUP_DOWNLOAD_URL,
@@ -8,6 +8,12 @@ import {
   fetchBackups,
   fetchSystemInfo,
 } from '../api/system'
+import {
+  fetchDuplicateSuppliers,
+  fetchPartyA,
+  mergeSuppliers,
+  savePartyA,
+} from '../api/catalog'
 import { useToast } from '../composables/useToast'
 import { fmtSize, formatInt } from '../lib/format'
 
@@ -20,6 +26,22 @@ const backingUp = ref(false)
 const error = ref('')
 const backupsError = ref('')
 const note = ref('')
+const partyAList = ref([])
+const partyAIndex = ref(0)
+const partySaving = ref(false)
+const partiesError = ref('')
+const duplicates = ref([])
+const duplicatesError = ref('')
+const merging = ref('')
+const partyForm = reactive({
+  name: '',
+  short: '',
+  credit_code: '',
+  contact: '',
+  tel: '',
+  email: '',
+  addr: '',
+})
 
 async function load() {
   loading.value = true
@@ -99,7 +121,72 @@ async function backupNow() {
   }
 }
 
-onMounted(load)
+function fillPartyForm() {
+  const item = partyAList.value[partyAIndex.value]
+  if (!item) return
+  Object.keys(partyForm).forEach((key) => {
+    partyForm[key] = item[key] || ''
+  })
+}
+
+async function loadParties() {
+  partiesError.value = ''
+  try {
+    const data = await fetchPartyA()
+    partyAList.value = data.items || []
+    if (partyAIndex.value >= partyAList.value.length) partyAIndex.value = 0
+    fillPartyForm()
+  } catch (e) {
+    partiesError.value = '甲方信息读取失败：' + (e && e.message ? e.message : e)
+  }
+}
+
+async function saveParty() {
+  if (partySaving.value || !partyForm.name) return
+  partySaving.value = true
+  try {
+    await savePartyA({ ...partyForm })
+    toastSuccess('甲方信息已保存')
+    await loadParties()
+  } catch (e) {
+    toastError('保存失败：' + (e && e.message ? e.message : e))
+  } finally {
+    partySaving.value = false
+  }
+}
+
+async function loadDuplicates() {
+  duplicatesError.value = ''
+  try {
+    const data = await fetchDuplicateSuppliers()
+    duplicates.value = data.items || []
+  } catch (e) {
+    duplicates.value = []
+    duplicatesError.value = '重复供应商读取失败：' + (e && e.message ? e.message : e)
+  }
+}
+
+async function doMerge(item) {
+  if (merging.value) return
+  const text = `把「${item.source.name}」并入「${item.target.name}」？合并前会自动备份。`
+  if (!window.confirm(text)) return
+  merging.value = item.source.name
+  try {
+    await mergeSuppliers(item.source.name, item.target.name)
+    toastSuccess('供应商已合并')
+    await Promise.all([loadDuplicates(), load()])
+  } catch (e) {
+    toastError('合并失败：' + (e && e.message ? e.message : e))
+  } finally {
+    merging.value = ''
+  }
+}
+
+onMounted(() => {
+  load()
+  loadParties()
+  loadDuplicates()
+})
 </script>
 
 <template>
@@ -129,6 +216,84 @@ onMounted(load)
         <a class="btn btn-ghost" :href="EXPORT_URL" download>导出数据包</a>
       </div>
       <div v-if="note" class="hint">{{ note }}</div>
+    </section>
+
+    <section class="card">
+      <div class="card-title">甲方信息</div>
+      <div v-if="partiesError" class="notice notice-error">{{ partiesError }}</div>
+      <div v-else-if="!partyAList.length" class="empty-text">正在读取甲方信息…</div>
+      <template v-else>
+        <div class="field">
+          <label class="field-label">公司</label>
+          <select v-model="partyAIndex" @change="fillPartyForm">
+            <option v-for="(item, index) in partyAList" :key="item.name" :value="index">
+              {{ item.name }}
+            </option>
+          </select>
+        </div>
+        <div class="form-grid">
+          <div class="field">
+            <label class="field-label">简称</label>
+            <input v-model="partyForm.short" />
+          </div>
+          <div class="field">
+            <label class="field-label">统一社会信用代码</label>
+            <input v-model="partyForm.credit_code" />
+          </div>
+          <div class="field">
+            <label class="field-label">联系人</label>
+            <input v-model="partyForm.contact" />
+          </div>
+          <div class="field">
+            <label class="field-label">联系电话</label>
+            <input v-model="partyForm.tel" />
+          </div>
+          <div class="field">
+            <label class="field-label">联系邮箱</label>
+            <input v-model="partyForm.email" />
+          </div>
+          <div class="field full">
+            <label class="field-label">联系地址</label>
+            <input v-model="partyForm.addr" />
+          </div>
+        </div>
+        <div class="actions-left stack-top">
+          <button type="button" class="btn btn-primary" :disabled="partySaving" @click="saveParty">
+            {{ partySaving ? '保存中…' : '保存甲方信息' }}
+          </button>
+        </div>
+      </template>
+    </section>
+
+    <section class="card">
+      <div class="card-title">供应商去重</div>
+      <div v-if="duplicatesError" class="notice notice-error">{{ duplicatesError }}</div>
+      <div v-else-if="!duplicates.length" class="empty-text">没有发现“短名 / 全称”候选。</div>
+      <div v-else class="table-scroll">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>并入（短名）</th>
+              <th>保留（全称）</th>
+              <th style="width: 110px">产品 / 合同</th>
+              <th style="width: 80px"></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="item in duplicates" :key="item.source.name + '|' + item.target.name">
+              <td>{{ item.source.name }}</td>
+              <td>{{ item.target.name }}</td>
+              <td class="muted">{{ item.source.products }} / {{ item.source.contracts }}</td>
+              <td class="cell-ops">
+                <button type="button" class="btn-link" :disabled="!!merging" @click="doMerge(item)">
+                  合并
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="hint">只合并确认属于同一家的记录；合并前自动备份，合并记录写入日志。</div>
     </section>
 
     <ContractStatusCard />

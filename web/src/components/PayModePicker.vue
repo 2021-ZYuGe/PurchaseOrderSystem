@@ -44,7 +44,10 @@ function onThreshold(event) {
 watch(
   [below, () => props.totalCents],
   () => {
-    if (below.value && props.modelValue !== 'full') emit('update:modelValue', 'full')
+    // 空单保持未选中；一旦有金额且低于阈值，再自动落到全款
+    if (props.totalCents > 0 && below.value && props.modelValue !== 'full') {
+      emit('update:modelValue', 'full')
+    }
   },
   { immediate: true },
 )

@@ -12,7 +12,7 @@ const props = defineProps({
   delay: { type: Number, default: 150 },
 })
 
-const emit = defineEmits(['update:modelValue'])
+const emit = defineEmits(['update:modelValue', 'clear', 'edit'])
 
 const root = ref(null)
 const inputValue = ref(props.modelValue ? props.optionTitle(props.modelValue) : '')
@@ -61,6 +61,8 @@ function onInput(event) {
     nextTick(() => {
       selfClearing = false
     })
+    // 文本一改动就通知父组件，用于立即提示“会清空订单”
+    if (value.trim()) emit('edit')
   }
   clearTimeout(timer)
   const q = value.trim()
@@ -86,6 +88,19 @@ function pick(item) {
   inputValue.value = props.optionTitle(item)
   results.value = []
   open.value = false
+}
+
+function clearSelection() {
+  inputValue.value = ''
+  results.value = []
+  open.value = false
+  emit('update:modelValue', null)
+  emit('clear')
+}
+
+function onBlur() {
+  // 用户把输入框删空后离开，视为取消选择；先交给父组件决定是否确认
+  if (!inputValue.value.trim() && props.modelValue) emit('clear')
 }
 
 function pickFirst() {
@@ -120,15 +135,28 @@ onUnmounted(() => {
 <template>
   <div ref="root" class="search-select">
     <label v-if="label" class="field-label">{{ label }}</label>
-    <input
-      :value="inputValue"
-      :placeholder="placeholder"
-      autocomplete="off"
-      @input="onInput"
-      @focus="onFocus"
-      @keydown.enter.prevent="pickFirst"
-      @keydown.esc="close"
-    />
+    <div class="search-input-wrap">
+      <input
+        :value="inputValue"
+        :placeholder="placeholder"
+        autocomplete="off"
+        @input="onInput"
+        @focus="onFocus"
+        @blur="onBlur"
+        @keydown.enter.prevent="pickFirst"
+        @keydown.esc="close"
+      />
+      <button
+        v-if="modelValue"
+        type="button"
+        class="search-clear"
+        title="取消选择"
+        @mousedown.prevent
+        @click="clearSelection"
+      >
+        ×
+      </button>
+    </div>
     <div v-if="open" class="search-results">
       <div v-if="loading" class="sr-empty">正在搜索…</div>
       <div v-else-if="error" class="sr-empty sr-error">{{ error }}</div>

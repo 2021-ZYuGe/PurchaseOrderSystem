@@ -67,7 +67,7 @@ function onImageError(event) {
               历史价: {{ item.historyPrices.slice(0, 3).map((p) => '¥' + p).join(' / ') }}
             </div>
             <div v-if="(item.images || []).length > 1" class="hint">
-              共 {{ item.images.length }} 张备选图，点图片右下角 ⇄ 切换
+              共 {{ item.images.length }} 张备选图，点图右上角 ⇄ 切换
             </div>
           </td>
           <td class="cell-spec">{{ item.spec || '—' }}</td>

@@ -33,9 +33,42 @@
   "id": "S0031", "name": "新胜（福州）彩印有限公司", "phone": "138...",
   "latest_sign_date": "2026-08-01", "main_contract_date": "2026-08-01",
   "latest_contract_no": "S26014483", "contract_count": 12,
-  "history_contract_count": 9, "product_ids": ["P0229", "P0301"]
+  "history_contract_count": 9, "product_ids": ["P0229", "P0301"],
+  "parties": [{
+    "party_a": "广州兴趣岛信息科技有限公司", "party_a_label": "广州兴趣岛信息科技有限公司",
+    "latest_sign": "2026-08-01", "contract_no": "S26014483", "contract_count": 12,
+    "start_date": "2025-08-01", "end_date": "2026-08-01",
+    "days_left": -111, "bucket": "expired", "pending": false
+  }]
 }]}
 ```
+未确认甲方的合同用 `party_a: ""`、`party_a_label: "未确认甲方"` 单独一项。
+
+## 甲方目录
+
+### GET `/api/party-a`
+```json
+{"items": [{"name": "广州兴趣岛信息科技有限公司", "short": "兴趣岛",
+  "credit_code": "91440104MA59C33C5N", "contact": "简丽冰",
+  "tel": "15814464431", "email": "", "addr": "..."}]}
+```
+
+### PUT `/api/party-a`
+请求体为一条甲方信息（`name` 必填，`short/credit_code/contact/tel/email/addr/active` 可选），
+返回保存后的对象。页面只从该接口取甲方目录。
+
+## 供应商去重
+
+### GET `/api/suppliers/duplicates`
+```json
+{"items": [{"source": {"name": "优尚", "products": 62, "contracts": 25},
+  "target": {"name": "优尚（广州）礼品贸易有限公司", "products": 113, "contracts": 116}}]}
+```
+`source` 是待并入的短名/错别字，`target` 是保留的全称。
+
+### POST `/api/suppliers/merge`
+请求 `{"source": "优尚", "target": "优尚（广州）礼品贸易有限公司"}`。
+合并前自动备份，返回 `{"source": "", "target": "", "products": 62, "contracts": 25, "profiles": 0}`。
 
 ## 供应商档案
 
@@ -61,7 +94,9 @@
  "counts": {"expired": 3, "d3": 1},
  "buckets": [{"key": "expired", "label": "已过期", "count": 3}],
  "items": [{
-   "supplier": "新胜", "end_date": "2026-12-01", "start_date": "2025-12-01",
+   "supplier": "新胜", "party_a": "广州兴趣岛信息科技有限公司",
+   "party_a_label": "广州兴趣岛信息科技有限公司",
+   "end_date": "2026-12-01", "start_date": "2025-12-01",
    "days_left": 14, "bucket": "d30", "bucket_label": "1 个月内",
    "contract_no": "S26014483", "contract_file": "S26014483/合同.docx",
    "source": "解析", "note": "", "pending": false,
@@ -69,10 +104,11 @@
 ```
 
 ### POST `/api/contracts/terms`
-请求 `{"supplier": "...", "start_date": "2026-01-01", "end_date": "2026-12-31", "note": ""}`
-返回 `{"term": {...}, "overview": {同上}}`。
+请求 `{"supplier": "...", "party_a": "广州兴趣岛信息科技有限公司",
+"start_date": "2026-01-01", "end_date": "2026-12-31", "note": ""}`
+返回 `{"term": {...}, "overview": {同上}}`。`party_a` 留空表示未确认甲方。
 
-### DELETE `/api/contracts/terms?supplier=新胜`
+### DELETE `/api/contracts/terms?supplier=新胜&party_a=广州兴趣岛信息科技有限公司`
 返回 `{"overview": {同上}}`。
 
 ### GET `/api/contracts/status`
@@ -83,11 +119,22 @@
   "newest_file": "", "newest_date": "", "samples": [], "checked_at": ""}}
 ```
 
+### GET `/api/contracts/sync`
+```json
+{"state": "idle|running|done|error", "total": 25, "started": "14:30:00",
+ "finished": "", "message": ""}
+```
+
+### POST `/api/contracts/sync`
+把扫描到的新合同解析入库，立即返回 `{"total": 25}`；进度用 GET 轮询。
+已有任务在跑时返回 409。
+
 ### GET `/api/contracts/search?q=S26006440&limit=50`
 按供应商、合同号、文件名模糊搜索合同台账；多个关键词用空格分隔，按 AND 匹配。
 `limit` 默认 50，最大 100。
 ```json
 {"query": "S26006440", "items": [{"supplier": "广州市宝优科技有限公司",
+  "party_a": "广州兴趣岛信息科技有限公司",
   "contract_no": "S26006440", "filename": "S26006440_..._采购合同.doc",
   "sign_date": "2026-05-26", "main_date": "2026-05-26",
   "start_date": "2026-05-26", "end_date": "2027-05-25"}]}
@@ -160,7 +207,7 @@
  "db": {"size": 2068480, "updated_at": "2026-11-17 10:00"},
  "media_count": 536,
  "counts": {"products": 1053, "suppliers": 165, "with_image": 515},
- "schema": {"version": 3, "migrations": []},
+ "schema": {"version": 4, "migrations": [3, 4]},
  "backups": {"count": 7, "latest": "purchase-...db", "latest_at": ""}}
 ```
 

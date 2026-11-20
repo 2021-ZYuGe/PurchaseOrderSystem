@@ -67,6 +67,7 @@ ROOT = os.path.dirname(os.path.dirname(HERE))            # 项目根目录
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
+from app.domain.names import name_key
 from app.infra import store as sqlite_store
 WEB = os.path.join(ROOT, "web")
 IMG = os.path.join(ROOT, "data", "media")
@@ -375,39 +376,44 @@ def merge(old_P, old_S, new_P, new_S):
         })
 
     # ---------- 合并供应商 ----------
+    # 按归一键合并，显示名取更长的那个（通常是带括号的全称）
+    before_s = len({name_key(s.get("供应商名称", "")) for s in old_S})
     spool = {}
-    for s in old_S:
-        spool[s.get("供应商名称", "")] = {
-            "电话": s.get("电话", ""),
-            "主合同日期": s.get("主合同日期", ""),
-            "历史合同份数": int(s.get("历史合同份数", 0) or 0),
-            "keys": set(k for pid in s.get("产品keys", []) for k in [old_pid2key.get(pid)] if k),
-        }
-    before_s = len(spool)
-    for s in new_S:
-        n = s.get("供应商名称", "")
-        if n not in spool:
-            spool[n] = {"电话": "", "主合同日期": "", "历史合同份数": 0, "keys": set()}
-        cur = spool[n]
+    for s, pid2key in ([(s, old_pid2key) for s in old_S]
+                       + [(s, new_pid2key) for s in new_S]):
+        raw = s.get("供应商名称", "")
+        key = name_key(raw)
+        cur = spool.get(key)
+        if cur is None:
+            cur = spool[key] = {"名称": raw, "电话": "", "主合同日期": "",
+                                "历史合同份数": 0, "keys": set()}
+        elif len(raw) > len(cur["名称"]):
+            cur["名称"] = raw
         cur["历史合同份数"] += int(s.get("历史合同份数", 0) or 0)
         if s.get("电话"):
             cur["电话"] = s["电话"]
         if s.get("主合同日期"):
             cur["主合同日期"] = max(cur["主合同日期"] or "", s["主合同日期"])
         for pid in s.get("产品keys", []):
-            if pid in new_pid2key:
-                cur["keys"].add(new_pid2key[pid])
+            if pid in pid2key:
+                cur["keys"].add(pid2key[pid])
 
     S = []
-    for i, (n, v) in enumerate(sorted(spool.items(), key=lambda x: (-x[1]["历史合同份数"], x[0])), 1):
+    for i, v in enumerate(sorted(spool.values(), key=lambda x: (-x["历史合同份数"], x["名称"])), 1):
         S.append({
             "id": "S%04d" % i,
-            "供应商名称": n,
+            "供应商名称": v["名称"],
             "电话": v["电话"],
             "主合同日期": v["主合同日期"],
             "历史合同份数": v["历史合同份数"],
             "产品keys": sorted(key2id[k] for k in v["keys"] if k in key2id),
         })
+
+    # 产品里的供应商名也换成合并后的显示名
+    canonical = {name_key(s["供应商名称"]): s["供应商名称"] for s in S}
+    for p in P:
+        p["供应商"] = list(dict.fromkeys(
+            canonical.get(name_key(n), n) for n in p["供应商"]))
 
     return P, S, len(P) - before_p, len(S) - before_s
 

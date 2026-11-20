@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """数据库结构与迁移：只被 app/infra/store.py 调用。"""
+import json
 import sqlite3
 import time
 
@@ -57,6 +58,7 @@ CREATE TABLE IF NOT EXISTS suppliers (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     code TEXT NOT NULL UNIQUE,
     name TEXT NOT NULL UNIQUE,
+    name_key TEXT NOT NULL DEFAULT '',
     phone TEXT NOT NULL DEFAULT '',
     main_contract_date TEXT NOT NULL DEFAULT '',
     contract_count INTEGER NOT NULL DEFAULT 0 CHECK(contract_count >= 0)
@@ -73,6 +75,7 @@ CREATE INDEX IF NOT EXISTS idx_suppliers_name ON suppliers(name);
 CREATE TABLE IF NOT EXISTS supplier_profiles (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
+    name_key TEXT NOT NULL DEFAULT '',
     credit_code TEXT NOT NULL DEFAULT '',
     contact TEXT NOT NULL DEFAULT '',
     tel TEXT NOT NULL DEFAULT '',
@@ -100,6 +103,9 @@ CREATE TABLE IF NOT EXISTS contracts (
     contract_no TEXT NOT NULL DEFAULT '',
     filename TEXT NOT NULL DEFAULT '',
     supplier_name TEXT NOT NULL DEFAULT '',
+    party_a TEXT NOT NULL DEFAULT '',
+    party_a_source TEXT NOT NULL DEFAULT '',
+    source_path TEXT NOT NULL DEFAULT '',
     main_contract_date TEXT,
     has_order_sheet INTEGER NOT NULL DEFAULT 0,
     order_sheet_start_paragraph INTEGER,
@@ -116,6 +122,28 @@ CREATE TABLE IF NOT EXISTS supplier_contract_terms (
     end_date TEXT NOT NULL DEFAULT '',
     note TEXT NOT NULL DEFAULT '',
     updated_at TEXT NOT NULL DEFAULT ''
+);
+
+-- 按“供应商 + 甲方”登记期限；party_a 为空表示未确认甲方
+CREATE TABLE IF NOT EXISTS supplier_party_terms (
+    supplier_name TEXT NOT NULL,
+    party_a TEXT NOT NULL DEFAULT '',
+    start_date TEXT NOT NULL DEFAULT '',
+    end_date TEXT NOT NULL DEFAULT '',
+    note TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY(supplier_name, party_a)
+);
+
+-- 供应商合并留痕
+CREATE TABLE IF NOT EXISTS supplier_merge_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_name TEXT NOT NULL,
+    target_name TEXT NOT NULL,
+    products INTEGER NOT NULL DEFAULT 0,
+    contracts INTEGER NOT NULL DEFAULT 0,
+    profiles INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS contract_sign_dates (
     contract_id INTEGER NOT NULL REFERENCES contracts(id) ON DELETE CASCADE,
@@ -169,24 +197,38 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 """
 
 
-def _ensure_columns(conn):
-    """老库补列：合同期限是后加的功能，早期库里没有这两列。
+_COLUMNS = {
+    "contracts": (
+        ("contract_start_date", "TEXT NOT NULL DEFAULT ''"),
+        ("contract_end_date", "TEXT NOT NULL DEFAULT ''"),
+        ("party_a", "TEXT NOT NULL DEFAULT ''"),
+        ("party_a_source", "TEXT NOT NULL DEFAULT ''"),
+        ("source_path", "TEXT NOT NULL DEFAULT ''"),
+    ),
+    "suppliers": (("name_key", "TEXT NOT NULL DEFAULT ''"),),
+    "supplier_profiles": (("name_key", "TEXT NOT NULL DEFAULT ''"),),
+}
 
-    ALTER TABLE 只在缺列时执行一次，重复运行不会报错；
+
+def _ensure_columns(conn):
+    """老库补列：ALTER TABLE 只在缺列时执行一次。
+
     两个进程同时升级时后一个会拿到「duplicate column」，忽略即可。
     """
-    cols = {row[1] for row in conn.execute("PRAGMA table_info(contracts)")}
-    for name, ddl in (("contract_start_date", "TEXT NOT NULL DEFAULT ''"),
-                      ("contract_end_date", "TEXT NOT NULL DEFAULT ''")):
-        if name in cols:
-            continue
-        try:
-            conn.execute("ALTER TABLE contracts ADD COLUMN %s %s" % (name, ddl))
-        except sqlite3.OperationalError as e:
-            if "duplicate column" not in str(e).lower():
-                raise
+    for table, columns in _COLUMNS.items():
+        existing = {row[1] for row in conn.execute("PRAGMA table_info(%s)" % table)}
+        for name, ddl in columns:
+            if name in existing:
+                continue
+            try:
+                conn.execute("ALTER TABLE %s ADD COLUMN %s %s" % (table, name, ddl))
+            except sqlite3.OperationalError as e:
+                if "duplicate column" not in str(e).lower():
+                    raise
     # 索引必须等列补齐后再建，否则老库执行 SCHEMA 时直接报「no such column」
     conn.execute("CREATE INDEX IF NOT EXISTS idx_contracts_end ON contracts(contract_end_date)")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_supplier_profiles_key ON supplier_profiles(name_key)")
 
 
 def init_schema(conn):
@@ -220,8 +262,156 @@ def _m3_drop_legacy(conn):
             conn.execute("DROP TABLE " + name)
 
 
+PARTY_A_SEED = {
+    "广州兴趣岛信息科技有限公司": {
+        "name": "广州兴趣岛信息科技有限公司",
+        "short": "兴趣岛",
+        "credit_code": "91440104MA59C33C5N",
+        "contact": "简丽冰",
+        "tel": "15814464431",
+        "email": "457263395@qq.com",
+        "addr": "广州市天河区奥体南路9号兴创楼二楼203供应链组",
+    },
+    "广州普惠优品电子商贸有限公司": {
+        "name": "广州普惠优品电子商贸有限公司",
+        "short": "普惠优品",
+        "credit_code": "91440106MA7LKA4517",
+        "contact": "简丽冰",
+        "tel": "15814464431",
+        "email": "457263395@qq.com",
+        "addr": "广州市天河区奥体南路9号兴创楼二楼203供应链组",
+    },
+}
+
+_PROFILE_TEXT_COLUMNS = (
+    "credit_code", "contact", "tel", "email", "addr", "wechat", "legal",
+    "bank_name", "bank_account", "bank_open", "source",
+)
+
+
+def _merge_supplier_rows(conn, keep, dup):
+    """把 dup 的产品、合同、期限、旧期限全部挂到 keep 上。"""
+    keep_id, dup_id = keep["id"], dup["id"]
+    keep_name, dup_name = keep["name"], dup["name"]
+    conn.execute(
+        "INSERT OR IGNORE INTO supplier_products(supplier_id, product_id) "
+        "SELECT ?, product_id FROM supplier_products WHERE supplier_id=?",
+        (keep_id, dup_id),
+    )
+    conn.execute("DELETE FROM supplier_products WHERE supplier_id=?", (dup_id,))
+    conn.execute("UPDATE contracts SET supplier_name=? WHERE supplier_name=?",
+                 (keep_name, dup_name))
+    conn.execute("UPDATE historical_order_items SET supplier_name=? WHERE supplier_name=?",
+                 (keep_name, dup_name))
+    conn.execute("UPDATE supplier_main_contracts SET supplier_name=? WHERE supplier_name=?",
+                 (keep_name, dup_name))
+    conn.execute("UPDATE product_supplier_names SET supplier_name=? WHERE supplier_name=?",
+                 (keep_name, dup_name))
+    for term in conn.execute(
+            "SELECT * FROM supplier_party_terms WHERE supplier_name=?", (dup_name,)).fetchall():
+        current = conn.execute(
+            "SELECT * FROM supplier_party_terms WHERE supplier_name=? AND party_a=?",
+            (keep_name, term["party_a"]),
+        ).fetchone()
+        if current and (current["end_date"] or "") >= (term["end_date"] or ""):
+            continue
+        conn.execute(
+            "INSERT OR REPLACE INTO supplier_party_terms"
+            "(supplier_name, party_a, start_date, end_date, note, updated_at) "
+            "VALUES(?, ?, ?, ?, ?, ?)",
+            (keep_name, term["party_a"], term["start_date"], term["end_date"],
+             term["note"], term["updated_at"]),
+        )
+    conn.execute("DELETE FROM supplier_party_terms WHERE supplier_name=?", (dup_name,))
+    old = conn.execute(
+        "SELECT * FROM supplier_contract_terms WHERE supplier_name=?", (dup_name,)).fetchone()
+    if old:
+        conn.execute(
+            "INSERT OR IGNORE INTO supplier_contract_terms"
+            "(supplier_name, start_date, end_date, note, updated_at) VALUES(?, ?, ?, ?, ?)",
+            (keep_name, old["start_date"], old["end_date"], old["note"], old["updated_at"]),
+        )
+        conn.execute("DELETE FROM supplier_contract_terms WHERE supplier_name=?", (dup_name,))
+    if not str(keep["phone"] or "").strip() and str(dup["phone"] or "").strip():
+        conn.execute("UPDATE suppliers SET phone=? WHERE id=?", (dup["phone"], keep_id))
+    conn.execute("DELETE FROM suppliers WHERE id=?", (dup_id,))
+
+
+def _m4_party_a_and_name_key(conn):
+    """v4：名称归一键、按甲方期限表、精确重复合并、甲方目录播种。"""
+    from app.domain.names import name_key
+
+    for table in ("suppliers", "supplier_profiles"):
+        for row in conn.execute("SELECT id, name FROM %s" % table).fetchall():
+            conn.execute("UPDATE %s SET name_key=? WHERE id=?" % table,
+                         (name_key(row["name"]), row["id"]))
+
+    conn.execute(
+        "INSERT OR IGNORE INTO supplier_party_terms"
+        "(supplier_name, party_a, start_date, end_date, note, updated_at) "
+        "SELECT supplier_name, '', start_date, end_date, note, updated_at "
+        "FROM supplier_contract_terms"
+    )
+
+    groups = {}
+    for row in conn.execute("SELECT * FROM suppliers ORDER BY id").fetchall():
+        groups.setdefault(row["name_key"], []).append(row)
+    for rows in groups.values():
+        if len(rows) < 2:
+            continue
+        keep = max(rows, key=lambda row: (row["contract_count"], len(row["name"]), -row["id"]))
+        for dup in rows:
+            if dup["id"] != keep["id"]:
+                _merge_supplier_rows(conn, keep, dup)
+        conn.execute(
+            "UPDATE suppliers SET contract_count=?, main_contract_date=? WHERE id=?",
+            (sum(row["contract_count"] for row in rows),
+             max((row["main_contract_date"] or "") for row in rows), keep["id"]),
+        )
+
+    groups = {}
+    for row in conn.execute("SELECT * FROM supplier_profiles ORDER BY id").fetchall():
+        groups.setdefault(row["name_key"], []).append(row)
+    for rows in groups.values():
+        if len(rows) < 2:
+            continue
+        keep = dict(max(rows, key=lambda row: (row["last_sign"] or "", len(row["name"]),
+                                              -row["id"])))
+        for dup in rows:
+            if dup["id"] == keep["id"]:
+                continue
+            for column in _PROFILE_TEXT_COLUMNS:
+                if not str(keep[column] or "").strip() and str(dup[column] or "").strip():
+                    keep[column] = dup[column]
+            if (dup["last_sign"] or "") > (keep["last_sign"] or ""):
+                keep["last_sign"] = dup["last_sign"]
+            conn.execute("DELETE FROM supplier_profiles WHERE id=?", (dup["id"],))
+        conn.execute(
+            "UPDATE supplier_profiles SET %s WHERE id=?" %
+            ", ".join("%s=?" % column for column in _PROFILE_TEXT_COLUMNS + ("last_sign",)),
+            [keep[column] for column in _PROFILE_TEXT_COLUMNS + ("last_sign",)] + [keep["id"]],
+        )
+
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_suppliers_name_key "
+        "ON suppliers(name_key) WHERE name_key <> ''"
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_contracts_party_a ON contracts(party_a)")
+    for name, payload in PARTY_A_SEED.items():
+        conn.execute(
+            "INSERT OR IGNORE INTO party_a_profiles(name, payload) VALUES(?, ?)",
+            (name, json.dumps(payload, ensure_ascii=False)),
+        )
+
+
+def repair_supplier_names(conn):
+    """再次执行名称归一与精确合并；已升级的库每次启动都可安全调用。"""
+    _m4_party_a_and_name_key(conn)
+
+
 MIGRATIONS = [
     (3, "drop_legacy_tables", _m3_drop_legacy),
+    (4, "party_a_and_name_key", _m4_party_a_and_name_key),
 ]
 
 

@@ -1,4 +1,4 @@
-import { getJSON, postJSON } from './client'
+import { getJSON, postJSON, putJSON } from './client'
 
 export function fetchMeta() {
   return getJSON('/api/catalog/meta')
@@ -18,4 +18,20 @@ export function fetchArchive(name = '') {
 
 export function saveArchive(profile) {
   return postJSON('/api/suppliers/archive', profile)
+}
+
+export function fetchPartyA() {
+  return getJSON('/api/party-a')
+}
+
+export function savePartyA(party) {
+  return putJSON('/api/party-a', party)
+}
+
+export function fetchDuplicateSuppliers() {
+  return getJSON('/api/suppliers/duplicates')
+}
+
+export function mergeSuppliers(source, target) {
+  return postJSON('/api/suppliers/merge', { source, target })
 }

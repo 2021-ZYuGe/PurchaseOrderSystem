@@ -22,13 +22,22 @@ const termOpen = ref(false)
 const termItem = ref(null)
 const termError = ref('')
 const termSaving = ref(false)
-const termForm = reactive({ supplier: '', start_date: '', end_date: '', note: '' })
+const termForm = reactive({
+  supplier: '',
+  party_a: '',
+  start_date: '',
+  end_date: '',
+  note: '',
+})
 
 const counts = computed(() => (expiry.value && expiry.value.counts) || {})
 const soon7 = computed(() => (counts.value.d3 || 0) + (counts.value.d7 || 0))
 const soon30 = computed(() => soon7.value + (counts.value.d30 || 0))
 const unknown = computed(() => (counts.value.pending || 0) + (counts.value.unknown || 0))
 const urgentCount = computed(() => (counts.value.expired || 0) + soon30.value)
+const unconfirmedCount = computed(
+  () => ((expiry.value && expiry.value.items) || []).filter((item) => !item.party_a).length,
+)
 
 const buckets = computed(() => (expiry.value && expiry.value.buckets) || [])
 const visibleBuckets = computed(() => buckets.value.filter((item) => item.count > 0))
@@ -44,6 +53,8 @@ const filteredItems = computed(() => {
   let items = [...((expiry.value && expiry.value.items) || [])]
   if (filter.value === 'urgent') {
     items = items.filter((item) => ['expired', 'd3', 'd7', 'd30'].includes(item.bucket))
+  } else if (filter.value === 'unconfirmed') {
+    items = items.filter((item) => !item.party_a)
   } else if (filter.value !== 'all') {
     items = items.filter((item) => item.bucket === filter.value)
   }
@@ -118,12 +129,16 @@ watch(keyword, (value) => {
 })
 
 function renew(item) {
-  router.push({ path: '/contract', query: { mode: 'renew', supplier: item.supplier } })
+  router.push({
+    path: '/contract',
+    query: { mode: 'renew', supplier: item.supplier, party: item.party_a || '' },
+  })
 }
 
 function openTerm(item) {
   termItem.value = item
   termForm.supplier = item.supplier
+  termForm.party_a = item.party_a || ''
   termForm.start_date = item.start_date || ''
   termForm.end_date = item.end_date || ''
   termForm.note = item.note || ''
@@ -164,7 +179,7 @@ async function deleteTermEntry() {
   termSaving.value = true
   termError.value = ''
   try {
-    const data = await removeTerm(termForm.supplier)
+    const data = await removeTerm(termForm.supplier, termForm.party_a)
     if (data.overview) expiry.value = data.overview
     closeTerm()
     toastSuccess('已撤销手工登记的期限')
@@ -236,6 +251,7 @@ onBeforeUnmount(() => {
               <thead>
                 <tr>
                   <th>供应商</th>
+                  <th>甲方</th>
                   <th style="width: 110px">合同号</th>
                   <th style="width: 110px">签署日期</th>
                   <th>合同期</th>
@@ -247,6 +263,7 @@ onBeforeUnmount(() => {
               <tbody>
                 <tr v-for="(item, index) in searchResults" :key="index">
                   <td><b>{{ item.supplier }}</b></td>
+                  <td class="muted">{{ item.party_a || '未确认' }}</td>
                   <td class="muted">{{ item.contract_no || '—' }}</td>
                   <td>{{ item.sign_date || item.main_date || item.start_date || '—' }}</td>
                   <td class="muted">{{ searchPeriod(item) }}</td>
@@ -299,6 +316,14 @@ onBeforeUnmount(() => {
             紧急（30 天内） <b>{{ urgentCount }}</b>
           </button>
           <button
+            type="button"
+            class="bucket"
+            :class="{ active: filter === 'unconfirmed' }"
+            @click="filter = 'unconfirmed'"
+          >
+            未确认甲方 <b>{{ unconfirmedCount }}</b>
+          </button>
+          <button
             v-for="bucket in visibleBuckets"
             :key="bucket.key"
             type="button"
@@ -318,6 +343,7 @@ onBeforeUnmount(() => {
             <thead>
               <tr>
                 <th>供应商</th>
+                <th>甲方</th>
                 <th>合同期</th>
                 <th style="width: 110px">到期日</th>
                 <th style="width: 110px">剩余</th>
@@ -326,7 +352,7 @@ onBeforeUnmount(() => {
               </tr>
             </thead>
             <tbody>
-              <tr v-for="item in filteredItems" :key="item.supplier">
+              <tr v-for="item in filteredItems" :key="item.supplier + '|' + item.party_a">
                 <td>
                   <b>{{ item.supplier }}</b>
                   <span v-if="item.pending" class="tag tag-plain">需核对</span>
@@ -334,6 +360,7 @@ onBeforeUnmount(() => {
                     最近签约 {{ item.last_sign_date }}
                   </div>
                 </td>
+                <td class="muted">{{ item.party_a_label }}</td>
                 <td class="muted">{{ periodText(item) }}</td>
                 <td>
                   <template v-if="item.pending && item.end_date">
@@ -360,7 +387,7 @@ onBeforeUnmount(() => {
     <div v-if="termOpen" class="modal-mask" @click.self="closeTerm">
       <div class="modal-panel term-panel">
         <div class="modal-title">登记合同期限</div>
-        <div class="hint">{{ termForm.supplier }}</div>
+        <div class="hint">{{ termForm.supplier }} · {{ termForm.party_a || '未确认甲方' }}</div>
         <div class="field">
           <label class="field-label">起始日期（可不填）</label>
           <input v-model="termForm.start_date" type="date" />

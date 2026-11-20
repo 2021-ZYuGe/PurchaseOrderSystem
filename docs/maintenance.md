@@ -16,6 +16,25 @@
 - 换电脑：旧机器「系统状态 → 导出数据包」，新机器首启向导里选这个 zip 恢复。
 - 恢复前会校验 sqlite 完整性与结构版本；来自更高版本的备份会被拒绝。
 
+## 历史甲方回填（结构 v4）
+
+合同文件默认在 `C:\Users\PC\Desktop\合同下载`，按文件名里的 `S\d{8}` 与台账单号匹配。
+
+```bat
+rem 只读预览：不写数据库
+runtime\python.exe tools\backfill_party_a.py
+
+rem 确认后执行：先备份，再在事务里写入
+runtime\python.exe tools\backfill_party_a.py --apply
+
+rem 合同放在别的目录
+runtime\python.exe tools\backfill_party_a.py --dir "D:\合同下载"
+```
+
+预览会输出合同总数、匹配到文件的数量、识别成功/未识别/无文件的数量、两家甲方分布和前 15 份未识别样例。
+执行前自动备份到 `data/backups/*_before_party_a_backfill.db`；脚本可重复执行，已回填的合同不会重复写。
+未识别的合同保持“未确认甲方”，在合同倒计时页筛出来逐条指定即可。
+
 ## 改合同逻辑后怎么验证
 
 不要只看页面。用同一份输入分别生成旧版和新版合同，逐段比对：

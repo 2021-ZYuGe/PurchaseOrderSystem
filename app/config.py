@@ -78,5 +78,5 @@ def _stamp_files():
 STAMP_FILES = _stamp_files()
 
 VERSION = str(_VERSION_INFO.get('version') or '2026-11-17')
-SCHEMA_VERSION = int(_VERSION_INFO.get('schema_version') or 3)
+SCHEMA_VERSION = int(_VERSION_INFO.get('schema_version') or 4)
 BUILD_TIME = str(_VERSION_INFO.get('build_time') or '')

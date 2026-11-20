@@ -44,6 +44,21 @@ def product(item):
     }
 
 
+def party(item):
+    return {
+        'party_a': item.get('甲方', ''),
+        'party_a_label': item.get('甲方名') or item.get('甲方') or '未确认甲方',
+        'latest_sign': item.get('最近签约', ''),
+        'contract_no': item.get('最近合同号', ''),
+        'contract_count': int(item.get('份数') or 0),
+        'start_date': item.get('合同起始', ''),
+        'end_date': item.get('合同截止', ''),
+        'days_left': item.get('剩余天数'),
+        'bucket': item.get('档位', ''),
+        'pending': bool(item.get('待确认')),
+    }
+
+
 def supplier(item):
     return {
         'id': item.get('id', ''),
@@ -55,6 +70,7 @@ def supplier(item):
         'contract_count': int(item.get('合同记录数') or 0),
         'history_contract_count': int(item.get('历史合同份数') or 0),
         'product_ids': item.get('产品keys') or [],
+        'parties': [party(x) for x in item.get('parties') or []],
     }
 
 
@@ -65,6 +81,7 @@ def profile(item):
 def term(item):
     return {
         'supplier': item.get('供应商', ''),
+        'party_a': item.get('甲方', ''),
         'start_date': item.get('起始日', ''),
         'end_date': item.get('到期日', ''),
     }
@@ -73,6 +90,8 @@ def term(item):
 def expiry_item(item):
     return {
         'supplier': item.get('供应商', ''),
+        'party_a': item.get('甲方', ''),
+        'party_a_label': item.get('甲方名') or '未确认甲方',
         'end_date': item.get('到期日', ''),
         'start_date': item.get('起始日', ''),
         'days_left': item.get('剩余天数'),
@@ -101,6 +120,7 @@ def expiry(data):
 def contract_search_item(item):
     return {
         'supplier': item.get('供应商', ''),
+        'party_a': item.get('甲方', ''),
         'contract_no': item.get('合同号', ''),
         'filename': item.get('文件名', ''),
         'sign_date': item.get('签署日期', ''),

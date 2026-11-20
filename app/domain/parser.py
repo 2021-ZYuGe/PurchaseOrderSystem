@@ -31,6 +31,8 @@ except ImportError:
     print("[错误] 缺少 python-docx 库，请确认 runtime 目录完整。")
     sys.exit(1)
 
+from app.domain.names import (PARTY_A_LABELS, PARTY_A_NAMES, clean_supplier_name)
+
 
 # ============ 工具函数 ============
 CLEAN_RE = re.compile(r"[\n\r\t]+")
@@ -258,22 +260,124 @@ def contract_no_of(path):
     return ""
 
 
+def _valid_supplier(name):
+    """公司名候选值的基本约束，挡掉条款、甲方名和字段标签。"""
+    if not name or len(name) < 3 or len(name) > 40:
+        return False
+    if name in PARTY_A_NAMES:
+        return False
+    if any(word in name for word in ("甲方", "购货单位", "联系人", "电话",
+                                     "法定代表人", "签字", "盖章", "日期")):
+        return False
+    return not is_dirty_name(name)
+
+
 def supplier_from_tables(doc):
-    """部分合同的乙方信息写在表格里：供货单位（乙方）：| 公司名"""
-    for table in doc.tables:
+    """首部表格里的乙方：标签后的同一段、下一段，或右侧单元格。"""
+    for table in doc.tables[:3]:
         for row in table.rows:
             cells = row.cells
             for i, cell in enumerate(cells):
-                text = clean_text(cell.text)
-                if "供货单位" not in text:
-                    continue
-                m = re.search(r"[：:]\s*(\S[^\n]{1,38})", text)
-                if m and clean_text(m.group(1)):
-                    return re.split(r"[\s　]", clean_text(m.group(1)))[0]
-                if i + 1 < len(cells):
-                    value = clean_text(cells[i + 1].text)
-                    if value and "：" not in value and ":" not in value:
-                        return re.split(r"[\s　]", value)[0]
+                paragraphs = [clean_text(p.text) for p in cell.paragraphs if clean_text(p.text)]
+                for j, text in enumerate(paragraphs):
+                    if "供货单位" not in text and not re.match(r"^乙方", text):
+                        continue
+                    parts = re.split(r"[：:]", text, maxsplit=1)
+                    value = parts[1] if len(parts) == 2 else ""
+                    if not value.strip() and j + 1 < len(paragraphs):
+                        value = paragraphs[j + 1]
+                    name = clean_supplier_name(value)
+                    if _valid_supplier(name):
+                        return name
+                    if i + 1 < len(cells):
+                        name = clean_supplier_name(cells[i + 1].text)
+                        if _valid_supplier(name):
+                            return name
+    return ""
+
+
+def supplier_from_paragraphs(doc):
+    """表格里没有时，再看正文前 80 段的“乙方：”。"""
+    for para in doc.paragraphs[:80]:
+        text = para.text.strip()
+        if "供货单位" not in text and not re.match(r"^乙方\s*[:：]", text):
+            continue
+        value = re.split(r"[：:]", text, maxsplit=1)[-1]
+        name = clean_supplier_name(value)
+        if _valid_supplier(name):
+            return name
+    return ""
+
+
+def supplier_from_header(doc):
+    return supplier_from_tables(doc) or supplier_from_paragraphs(doc)
+
+
+def party_a_from_text(text):
+    """在文本里认两家甲方：只有一家直接取，两家都有看标签邻近，再看出现次数。"""
+    text = str(text or "")
+    hits = [name for name in PARTY_A_NAMES if name in text]
+    if len(hits) == 1:
+        return hits[0]
+    if not hits:
+        return ""
+    for label in PARTY_A_LABELS:
+        for match in re.finditer(label, text):
+            window = text[match.start():match.start() + 80]
+            for name in hits:
+                if name in window:
+                    return name
+    return max(hits, key=lambda name: text.count(name))
+
+
+def party_a_from_doc(doc):
+    parts = []
+    for table in doc.tables[:3]:
+        for row in table.rows:
+            parts.extend(cell.text for cell in row.cells)
+    parts.extend(p.text for p in doc.paragraphs[:80])
+    return party_a_from_text("\n".join(parts))
+
+
+def party_a_from_path(path):
+    """给回填/核对脚本用：按真实格式读一份合同，返回甲方名称或空串。"""
+    if str(path).lower().endswith(".doc"):
+        return party_a_from_text(legacy_doc_text(path)[:12000])
+    doc = Document(str(path))
+    try:
+        accept_revisions(doc)
+    except Exception:
+        pass
+    return party_a_from_doc(doc)
+
+
+# 文件头魔数：靠内容而不是后缀判断真实格式
+ZIP_MAGIC = b"PK\x03\x04"                                       # docx 等 OOXML 都是 zip
+OLE_MAGIC = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"                 # Word 97-2003 复合文档
+
+
+def sniff_kind(path):
+    """按文件头判断真实格式，不看扩展名。
+
+    财务导出的合同常把 .docx 另存成 .doc（或反过来改后缀），只按后缀分派会走错
+    解析器：真 docx 被当成老 .doc 去猜编码，产品全丢；真 .doc 交给 python-docx
+    又直接抛异常算失败。这里按魔数分派：
+
+      - ZIP 头  → "docx"，交给 python-docx，能正常提产品和期限
+      - OLE 头  → "doc"，走 legacy 解码，登记供应商/日期/期限
+
+    返回 "" 表示两种头都不是（加密文档、扫描件、RTF、纯文本等），
+    由调用方按后缀回落到旧行为。
+    """
+    try:
+        with open(path, "rb") as fh:
+            head = fh.read(8)
+    except OSError:
+        return ""
+    if head[:4] == ZIP_MAGIC:
+        return "docx"
+    if head[:8] == OLE_MAGIC:
+        return "doc"
     return ""
 
 
@@ -300,7 +404,7 @@ def legacy_doc_text(path):
 
 
 def supplier_from_text(text):
-    """从 .doc 纯文本里抓乙方名称"""
+    """从 .doc 纯文本里抓乙方名称；调用方只传前 8000 字。"""
     patterns = (
         r"供货单位[（(]?乙方[）)]?\s*[:：]\s*([^\n]{2,40})",
         r"乙方[（(]?供货单位[）)]?\s*[:：]\s*([^\n]{2,40})",
@@ -310,11 +414,9 @@ def supplier_from_text(text):
         match = re.search(pattern, text or "")
         if not match:
             continue
-        value = clean_text(match.group(1))
-        value = re.split(r"[（(]盖章[）)]|地址|联系人|电话|开户|统一社会", value)[0]
-        value = re.sub(r"\s+", "", value).strip(" ：:　")
-        if 2 <= len(value) <= 40 and not is_dirty_name(value):
-            return value
+        name = clean_supplier_name(match.group(1))
+        if _valid_supplier(name):
+            return name
     return ""
 
 
@@ -331,7 +433,7 @@ def parse_legacy_doc(path):
         procurement = "购销框架" in head or "产品订购" in head
     if not procurement:
         return None, "非采购合同"
-    supplier = supplier_from_text(text)
+    supplier = supplier_from_text(text[:8000])
     if not supplier:
         return None, "缺供应商"
     main_date = parse_main_contract_date_text(text)
@@ -347,6 +449,7 @@ def parse_legacy_doc(path):
         phone = match.group(1)
     return {
         "供应商": supplier,
+        "甲方": party_a_from_text(text[:12000]),
         "电话": phone,
         "主合同日期": main_date or "",
         "签署日期": sign_dates,
@@ -541,7 +644,14 @@ def main(argv=None, workdir=None, interactive=False):
     for idx, path in enumerate(docs, 1):
         if idx % 5 == 0 or idx == len(docs):
             print(f"  已处理 {idx}/{len(docs)} …")
-        if path.lower().endswith(".doc"):
+        # 先按文件头分派，读不出魔数时才回落到后缀判断
+        suffix = "doc" if path.lower().endswith(".doc") else "docx"
+        kind = sniff_kind(path) or suffix
+        # 后缀和真实格式不一致时留痕，逐份结果里能看出是按哪种格式解析的
+        mismatch = ""
+        if kind != suffix:
+            mismatch = "后缀 .%s 实际是 %s，已按 %s 解析" % (suffix, kind, kind)
+        if kind == "doc":
             record, reason = parse_legacy_doc(path)
             if not record:
                 skipped.append(Path(path).name)
@@ -565,6 +675,7 @@ def main(argv=None, workdir=None, interactive=False):
                 "合同号": contract_no_of(path),
                 "文件名": Path(path).name,
                 "供应商": sup_name,
+                "甲方": record.get("甲方", ""),
                 "主合同日期": record["主合同日期"],
                 "签署日期": record["签署日期"],
                 "合同起始": record["合同起始"],
@@ -574,7 +685,7 @@ def main(argv=None, workdir=None, interactive=False):
             results.append({
                 "文件名": Path(path).name, "合同号": contract_no_of(path),
                 "来源文件": str(path), "结果": "成功",
-                "原因": "doc 格式，已登记合同日期，未提取产品",
+                "原因": (mismatch + "；" if mismatch else "") + "doc 二进制格式，已登记合同日期，未提取产品",
                 "供应商": sup_name, "正文日期": record["主合同日期"],
             })
             continue
@@ -595,14 +706,9 @@ def main(argv=None, workdir=None, interactive=False):
         except Exception:
             pass
 
-        # 供应商名：优先从"供货单位（乙方）"抓
-        sup_name = ""
-        all_text = "\n".join(p.text for p in doc.paragraphs)
-        m = re.search(r"供货单位[（(]?乙方[）)]?\s*[:：]\s*([^\n]{2,40})", all_text)
-        if m:
-            sup_name = re.split(r"[\s　]", clean_text(m.group(1)))[0]
-        if not sup_name:
-            sup_name = supplier_from_tables(doc)
+        # 供应商名：首部表格优先，正文其次，最后才用文件名
+        sup_name = supplier_from_header(doc)
+        party_a = party_a_from_doc(doc)
         if not sup_name:
             stem = clean_text(Path(path).stem)
             stem = re.sub(r"^(合同|附件|订购清单)[-_]?", "", stem)
@@ -624,7 +730,7 @@ def main(argv=None, workdir=None, interactive=False):
                     "供应商": "", "正文日期": "",
                 })
                 continue
-            sup_name = stem[:30]
+            sup_name = clean_supplier_name(stem)[:30]
         if is_dirty_name(sup_name):
             # 空白模板、委托设计等非采购合同：没有乙方也没有产品表，跳过而不是判失败
             if not has_product_table(doc):
@@ -666,6 +772,7 @@ def main(argv=None, workdir=None, interactive=False):
             "合同号": contract_no_of(path),
             "文件名": Path(path).name,
             "供应商": sup_name,
+            "甲方": party_a,
             "主合同日期": d or "",
             "签署日期": parse_sign_dates(doc),
             "合同起始": term_start,
@@ -751,7 +858,7 @@ def main(argv=None, workdir=None, interactive=False):
         ok += 1
         results.append({
             "文件名": Path(path).name, "合同号": contract_no_of(path), "来源文件": str(path),
-            "结果": "已导入", "原因": "",
+            "结果": "已导入", "原因": mismatch,
             "供应商": sup_name, "正文日期": d or "",
             "产品数": got,
         })
@@ -819,7 +926,7 @@ def main(argv=None, workdir=None, interactive=False):
     if workdir is None:
         # 正式运行：SQLite 是唯一主库；增量批次只输出 JSON。
         from app.infra import store as sqlite_store
-        sqlite_store.replace_catalog(P, S)
+        sqlite_store.replace_catalog(P, S, contracts=contract_records)
     else:
         # “合并新合同”的隔离批次只输出临时 JSON，不接触正式数据库。
         (here / "web" / "_批次目录.json").write_text(

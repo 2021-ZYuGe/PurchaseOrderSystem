@@ -44,3 +44,37 @@ def archive_save():
         raise ApiError('invalid_argument', '供应商名称不能为空')
     supplier_repo.save_supplier_profile(body)
     return ok({'saved': True})
+
+
+PARTY_A_FIELDS = ('short', 'credit_code', 'contact', 'tel', 'email', 'addr', 'active')
+
+
+def party_a_list():
+    return ok({'items': supplier_repo.list_party_a()})
+
+
+def party_a_save():
+    body = request.get_json(silent=True) or {}
+    name = str(body.get('name') or '').strip()
+    if not name:
+        raise ApiError('invalid_argument', '甲方名称不能为空')
+    payload = {key: body.get(key) for key in PARTY_A_FIELDS if key in body}
+    if 'active' in payload:
+        payload['active'] = bool(payload['active'])
+    return ok(supplier_repo.save_party_a(name, payload))
+
+
+def duplicates():
+    return ok({'items': supplier_repo.supplier_duplicate_candidates()})
+
+
+def merge():
+    body = request.get_json(silent=True) or {}
+    source = str(body.get('source') or '').strip()
+    target = str(body.get('target') or '').strip()
+    if not source or not target:
+        raise ApiError('invalid_argument', '请选择要合并的两个供应商')
+    try:
+        return ok(supplier_repo.merge_suppliers(source, target))
+    except ValueError as exc:
+        raise ApiError('invalid_argument', str(exc))

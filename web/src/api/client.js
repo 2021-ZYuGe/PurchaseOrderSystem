@@ -80,6 +80,10 @@ export function postJSON(path, body, options = {}) {
   return requestJSON(path, { ...options, method: 'POST', body: body === undefined ? {} : body })
 }
 
+export function putJSON(path, body, options = {}) {
+  return requestJSON(path, { ...options, method: 'PUT', body: body === undefined ? {} : body })
+}
+
 export function deleteJSON(path, options = {}) {
   return requestJSON(path, { ...options, method: 'DELETE' })
 }

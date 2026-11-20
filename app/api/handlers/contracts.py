@@ -7,6 +7,7 @@ from app.api.responses import ApiError, ok
 from app.infra.repositories import contracts as contract_repo
 from app.infra.repositories import suppliers as supplier_repo
 from app.services import contracts as contract_service
+from app.services import sync as sync_service
 
 
 def expiry():
@@ -21,6 +22,7 @@ def save_term():
             body.get('start_date') or '',
             body.get('end_date') or '',
             body.get('note') or '',
+            body.get('party_a') or '',
         )
     except ValueError as exc:
         raise ApiError('invalid_argument', str(exc))
@@ -30,8 +32,9 @@ def save_term():
 
 def delete_term():
     name = (request.args.get('supplier') or '').strip()
+    party = (request.args.get('party_a') or '').strip()
     try:
-        result = supplier_repo.delete_contract_term(name)
+        result = supplier_repo.delete_contract_term(name, party)
     except ValueError as exc:
         raise ApiError('invalid_argument', str(exc))
     return ok({'term': serializers.term(result),
@@ -43,6 +46,17 @@ def status():
         'freshness': serializers.freshness(contract_repo.data_freshness()),
         'pending': serializers.pending(contract_repo.scan_pending_contracts()),
     })
+
+
+def sync_status():
+    return ok(sync_service.status())
+
+
+def sync_start():
+    result = sync_service.start()
+    if not result.get('ok'):
+        raise ApiError('conflict', result.get('error') or '启动更新失败', 409)
+    return ok(result)
 
 
 def search():

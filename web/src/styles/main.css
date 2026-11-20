@@ -466,6 +466,35 @@ a {
   position: relative;
 }
 
+.search-input-wrap {
+  position: relative;
+}
+
+.search-input-wrap input {
+  padding-right: 30px;
+}
+
+.search-clear {
+  position: absolute;
+  top: 50%;
+  right: 7px;
+  transform: translateY(-50%);
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 50%;
+  background: #e9edf3;
+  color: #5f6b7a;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.search-clear:hover {
+  background: #dfe5ee;
+  color: #1f2329;
+}
+
 .search-results {
   position: absolute;
   top: calc(100% + 4px);
@@ -1342,3 +1371,265 @@ a {
   white-space: nowrap;
 }
 
+
+/* ---------- 下单页：供应商与合同摘要 ---------- */
+.supplier-row {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.supplier-search {
+  flex: 1;
+  min-width: 280px;
+}
+
+.supplier-picked {
+  flex: 0 0 300px;
+}
+
+@media (max-width: 760px) {
+  .supplier-picked {
+    flex: 1 1 100%;
+  }
+}
+
+.contract-box {
+  margin-top: 14px;
+  padding: 12px 16px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.contract-box.ok {
+  background: #e8f5e9;
+  border-color: #a5d6a7;
+  color: #1b5e20;
+}
+
+.contract-box.warn {
+  background: #fff8e1;
+  border-color: #ffe0a3;
+  color: #8a5a00;
+}
+
+.contract-box.danger {
+  background: #fdecea;
+  border-color: #f3c2bd;
+  color: #8c1d18;
+}
+
+.contract-box.info {
+  background: #eef4fc;
+  border-color: #cfe0f5;
+  color: #1a5fb4;
+}
+
+.contract-box .cb-title {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.contract-box .cb-sub {
+  font-weight: 400;
+  font-size: 12px;
+  opacity: 0.75;
+  margin-left: 6px;
+}
+
+.contract-box .cb-line {
+  margin-top: 3px;
+}
+
+.contract-box .cb-party {
+  margin-top: 6px;
+}
+
+.contract-box .cb-meta {
+  margin-top: 9px;
+  padding-top: 8px;
+  border-top: 1px dashed rgba(0, 0, 0, 0.13);
+  font-size: 12px;
+  line-height: 1.8;
+  color: #5f6b7a;
+}
+
+.contract-box .cb-meta .warn {
+  color: #b26a00;
+  font-weight: 600;
+}
+
+.contract-box .cb-meta .ok {
+  color: #1b5e20;
+}
+
+.contract-box .cb-meta .muted {
+  color: #8a94a3;
+}
+
+.contract-box .cb-actions {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.contract-box .cb-btn {
+  background: #1a5fb4;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 14px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.contract-box .cb-btn:hover {
+  background: #154a8f;
+}
+
+.contract-box .cb-btn:disabled {
+  background: #a8c3e3;
+  cursor: not-allowed;
+}
+
+.contract-box .cb-msg {
+  font-size: 12px;
+  color: #5f6b7a;
+}
+
+.cb-tag {
+  display: inline-block;
+  font-size: 12px;
+  padding: 1px 8px;
+  border-radius: 9px;
+  margin-left: 6px;
+  font-weight: 600;
+}
+
+.cb-link {
+  color: #1a5fb4;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.expiry-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  background: #fff8e1;
+  border: 1px solid #ffe0a3;
+  color: #8a5a00;
+  border-radius: 10px;
+  padding: 12px 18px;
+  margin-bottom: 16px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.expiry-bar.urgent {
+  background: #fdecea;
+  border-color: #f3c2bd;
+  color: #b71c1c;
+}
+
+.expiry-bar .eb-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  flex-wrap: wrap;
+  line-height: 1.7;
+}
+
+.expiry-bar .eb-main b {
+  font-size: 15px;
+}
+
+.expiry-bar .eb-btn {
+  background: #1a5fb4;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 7px 18px;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.expiry-bar .eb-btn:hover {
+  background: #154a8f;
+}
+
+/* ---------- 下单页：甲方信息块 ---------- */
+.pa-block {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px dashed #e5e9ef;
+}
+
+.pa-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.pa-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--brand);
+}
+
+.pa-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(150px, 1fr));
+  gap: 10px 14px;
+}
+
+.pa-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.pa-field select,
+.pa-field input {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  font-size: 13px;
+  background: #fff;
+  color: var(--text);
+}
+
+.pa-field select:focus,
+.pa-field input:focus {
+  outline: none;
+  border-color: var(--brand);
+  box-shadow: 0 0 0 2px rgba(26, 95, 180, 0.12);
+}
+
+.pa-field input[readonly] {
+  background: #f6f8fb;
+  color: var(--muted);
+}
+
+.pa-full {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 760px) {
+  .pa-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
